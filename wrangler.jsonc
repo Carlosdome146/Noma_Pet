@@ -1,14 +1,13 @@
 {
-  "name": "noma-pet",
+  "name": "nomapet",
   "main": "./worker.js",
-  "compatibility_date": "2026-08-13",
+  "compatibility_date": "2026-08-14",
 
   "assets": {
     "directory": "./",
     "binding": "ASSETS",
     "run_worker_first": [
-      "/api/*",
-      "/media/*"
+      "/api/*"
     ]
   },
 
@@ -17,13 +16,6 @@
       "binding": "DB",
       "database_name": "nomapet-db",
       "database_id": "dd15a1c4-0a74-4875-b6a7-04a136fa539a"
-    }
-  ],
-
-  "r2_buckets": [
-    {
-      "binding": "PRODUCT_IMAGES",
-      "bucket_name": "nomapet-images"
     }
   ]
 }
