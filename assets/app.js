@@ -37,7 +37,35 @@ function escapeHtml(s=''){return String(s).replace(/[&<>'"]/g,c=>({'&':'&amp;','
 function productCard(p){return `<article class="product" data-cat="${p.cat}"><a href="producto.html?id=${encodeURIComponent(p.id)}" class="photo"><span class="tag">${escapeHtml(p.tag||'')}</span>${productVisual(p)}</a><div class="product-body"><h3>${escapeHtml(p.name)}</h3><p>${escapeHtml(p.desc||'')}</p><div class="price"><div><strong>${money(p.price)}</strong><div class="meta">IVA y envío: por configurar</div></div><button class="btn primary" data-add="${p.id}" onclick="add('${p.id}')">Añadir</button></div></div></article>`}
 function renderProducts(target='products',limit){const el=document.getElementById(target);if(!el)return;el.innerHTML=PRODUCTS.slice(0,limit||PRODUCTS.length).map(productCard).join('')}
 function initFilters(){document.querySelectorAll('.filter').forEach(f=>f.addEventListener('click',()=>{document.querySelectorAll('.filter').forEach(x=>x.classList.remove('active'));f.classList.add('active');const cat=f.dataset.filter;document.querySelectorAll('.product').forEach(p=>p.style.display=(cat==='all'||p.dataset.cat===cat)?'flex':'none')}))}
-function renderDetail(){const el=document.getElementById('detail');if(!el)return;const id=new URLSearchParams(location.search).get('id')||PRODUCTS[0]?.id;const p=PRODUCTS.find(x=>x.id===id)||PRODUCTS[0];if(!p){el.innerHTML='<p>Producto no encontrado.</p>';return}document.title=p.name+' — NÓMA PET';const visual=p.imageUrl?`<div class="bigphoto"><img src="${p.imageUrl}" alt="${escapeHtml(p.name)}"></div>`:`<div class="bigphoto">${p.emoji||'🐾'}</div>`;el.innerHTML=`${visual}<div class="detail"><span class="eyebrow">Selección funcional</span><h1>${escapeHtml(p.name)}</h1><div class="pricebig">${money(p.price)}</div><p class="lead">${escapeHtml(p.description||p.desc||'')}</p><ul class="bullets"><li>✓ Producto ligero y sencillo de explicar</li><li>✓ Sin electrónica ni consumibles regulados</li><li>✓ Ideal para demostraciones en vídeo corto</li><li>✓ Proveedor y plazo UE pendientes de homologación</li></ul><div style="display:flex;gap:12px;align-items:center;margin:24px 0"><div class="qty"><button onclick="changeQty(-1)">−</button><span id="qty">1</span><button onclick="changeQty(1)">+</button></div><button class="btn primary" onclick="add('${p.id}',Number(document.getElementById('qty').textContent))">Añadir al carrito</button></div><div class="notice">Antes de vender, verificaremos muestra, materiales, operador responsable en la UE, documentación GPSR, coste real puesto en España y política de devolución del proveedor.</div></div>`}
+function productImages(p){
+  if(Array.isArray(p.images)&&p.images.length)return p.images;
+  if(p.imageUrl)return [{url:p.imageUrl,alt:p.name||''}];
+  return [];
+}
+function renderDetail(){
+  const el=document.getElementById('detail');if(!el)return;
+  const id=new URLSearchParams(location.search).get('id')||PRODUCTS[0]?.id;
+  const p=PRODUCTS.find(x=>x.id===id)||PRODUCTS[0];
+  if(!p){el.innerHTML='<p>Producto no encontrado.</p>';return}
+  document.title=p.name+' — NÓMA PET';
+  const imgs=productImages(p);
+  let visual;
+  if(imgs.length){
+    const first=imgs[0];
+    const thumbs=imgs.length>1?`<div class="gallery-thumbs">${imgs.map((img,i)=>`<button class="gallery-thumb ${i===0?'active':''}" type="button" data-gallery-index="${i}"><img src="${escapeHtml(img.url)}" alt="${escapeHtml(img.alt||p.name)}"></button>`).join('')}</div>`:'';
+    visual=`<div class="product-gallery"><div class="bigphoto"><img id="galleryMainImage" src="${escapeHtml(first.url)}" alt="${escapeHtml(first.alt||p.name)}"></div>${thumbs}</div>`;
+  }else{
+    visual=`<div class="bigphoto">${p.emoji||'🐾'}</div>`;
+  }
+  el.innerHTML=`${visual}<div class="detail"><span class="eyebrow">Selección funcional</span><h1>${escapeHtml(p.name)}</h1><div class="pricebig">${money(p.price)}</div><p class="lead">${escapeHtml(p.description||p.desc||'')}</p><ul class="bullets"><li>✓ Producto ligero y sencillo de explicar</li><li>✓ Sin electrónica ni consumibles regulados</li><li>✓ Ideal para demostraciones en vídeo corto</li><li>✓ Proveedor y plazo UE pendientes de homologación</li></ul><div style="display:flex;gap:12px;align-items:center;margin:24px 0"><div class="qty"><button onclick="changeQty(-1)">−</button><span id="qty">1</span><button onclick="changeQty(1)">+</button></div><button class="btn primary" onclick="add('${p.id}',Number(document.getElementById('qty').textContent))">Añadir al carrito</button></div><div class="notice">Antes de vender, verificaremos muestra, materiales, operador responsable en la UE, documentación GPSR, coste real puesto en España y política de devolución del proveedor.</div></div>`;
+  if(imgs.length>1){
+    el.querySelectorAll('[data-gallery-index]').forEach(btn=>btn.addEventListener('click',()=>{
+      const index=Number(btn.dataset.galleryIndex);const img=imgs[index];const main=document.getElementById('galleryMainImage');
+      if(!img||!main)return;main.src=img.url;main.alt=img.alt||p.name;
+      el.querySelectorAll('[data-gallery-index]').forEach(x=>x.classList.toggle('active',x===btn));
+    }));
+  }
+}
 function changeQty(d){const q=document.getElementById('qty');q.textContent=Math.max(1,Number(q.textContent)+d)}
 function renderCart(){const list=document.getElementById('cart-items'),sum=document.getElementById('summary');if(!list||!sum)return;const c=cart();if(!c.length){list.innerHTML='<div class="feature"><h3>Tu carrito está vacío</h3><p>Prueba a añadir uno de los productos del catálogo.</p><a class="btn primary" href="tienda.html">Ir a tienda</a></div>';sum.innerHTML='';return}let subtotal=0;const rows=[];for(const x of c){const p=PRODUCTS.find(y=>y.id===x.id);if(!p)continue;subtotal+=p.price*x.qty;rows.push(`<div class="cartitem"><div class="cartthumb">${p.imageUrl?`<img src="${p.imageUrl}" alt="">`:p.emoji||'🐾'}</div><div><b>${escapeHtml(p.name)}</b><div class="meta">${money(p.price)} · Cantidad ${x.qty}</div><button style="border:0;background:none;padding:6px 0;color:#8a4a34;cursor:pointer" onclick="removeItem('${x.id}')">Eliminar</button></div><div class="right"><b>${money(p.price*x.qty)}</b></div></div>`)}list.innerHTML=rows.join('');sum.innerHTML=`<h3>Resumen</h3><div class="row"><span>Productos</span><b>${money(subtotal)}</b></div><div class="row"><span>Envío</span><span>Por calcular</span></div><div class="row total"><span>Total</span><span>${money(subtotal)}</span></div><button class="btn primary" style="width:100%;margin-top:14px" onclick="alert('La integración de Stripe se hará después de homologar proveedor y costes reales.')">Continuar al pago</button><p class="tiny">Checkout todavía desactivado. No procesa pagos.</p>`}
 function removeItem(id){saveCart(cart().filter(x=>x.id!==id));renderCart()}

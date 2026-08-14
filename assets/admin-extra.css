@@ -436,3 +436,42 @@ body.modal-open{
     font-size:38px;
   }
 }
+
+
+/* R2 image manager */
+.admin-product-thumb{
+  width:46px;height:46px;border-radius:12px;object-fit:cover;display:block;flex:0 0 auto;
+  border:1px solid #dbe0dc;background:#edf2ef;
+}
+.r2-dropzone{
+  display:flex;align-items:center;gap:16px;padding:20px;border:2px dashed #b8c8c0;
+  border-radius:20px;background:#f8fbf9;cursor:pointer;transition:.18s;margin-top:4px;
+}
+.r2-dropzone:hover,.r2-dropzone.dragging{border-color:#2f6651;background:#edf5f0;transform:translateY(-1px)}
+.r2-dropzone.uploading{opacity:.65;pointer-events:none}
+.r2-drop-icon{width:48px;height:48px;border-radius:15px;background:#e4efe9;color:#24503f;display:grid;place-items:center;font-size:28px;font-weight:900;flex:0 0 auto}
+.r2-dropzone b{display:block;font-size:16px}
+.r2-dropzone p{margin:3px 0 0;color:#65716b;font-size:13px}
+.r2-dropzone .btn{margin-left:auto;white-space:nowrap}
+.r2-help{margin:10px 0 14px}
+.r2-image-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.r2-image-card{display:grid;grid-template-columns:86px 1fr;gap:12px;align-items:center;background:#fff;border:1px solid #dbe0dc;border-radius:17px;padding:10px;position:relative}
+.r2-image-card.primary{border-color:#82aa97;box-shadow:0 0 0 2px rgba(47,102,81,.08)}
+.r2-image-card.pending{border-style:dashed}
+.r2-image-preview{width:86px;height:76px;border-radius:12px;overflow:hidden;background:#edf2ef}
+.r2-image-preview img{width:100%;height:100%;object-fit:cover;display:block}
+.r2-image-info{min-width:0}
+.r2-image-info b,.r2-image-info span{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.r2-image-actions{grid-column:1/-1;display:flex;gap:7px;flex-wrap:wrap;border-top:1px solid #eef1ef;padding-top:9px}
+.mini-btn{border:1px solid #dbe0dc;background:#fff;border-radius:999px;padding:7px 10px;font-size:12px;font-weight:800;cursor:pointer;color:#17201c}
+.mini-btn:hover{background:#f2f5f3}
+.mini-btn:disabled{opacity:.35;cursor:not-allowed}
+.mini-btn.danger{color:#9c3426;background:#fff7f5;border-color:#f0c5bd}
+.r2-empty{grid-column:1/-1;border:1px dashed #ccd5d0;border-radius:17px;padding:20px;color:#65716b;text-align:center;background:#f8faf9}
+@media(max-width:720px){
+  .r2-dropzone{align-items:flex-start;flex-wrap:wrap}.r2-dropzone .btn{margin-left:64px}
+  .r2-image-grid{grid-template-columns:1fr}
+}
+@media(max-width:480px){
+  .r2-dropzone .btn{margin-left:0;width:100%}.r2-drop-icon{width:42px;height:42px}
+}
