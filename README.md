@@ -1,97 +1,67 @@
-# NÓMA PET — repositorio completo actual
+# NÓMA PET — Fase 6 completa · Stripe TEST
 
-Este ZIP contiene el proyecto completo actualizado hasta la Fase 5 (pedidos + checkout de prueba).
-
-## Arquitectura
-
-- Cloudflare Worker + Static Assets
-- Cloudflare D1: `nomapet-db`
-- D1 binding: `DB`
-- Cloudflare R2: `nomapet-images`
-- R2 binding: `PRODUCT_IMAGES`
-- Admin protegido mediante secret de runtime: `ADMIN_TOKEN`
-- Deploy command: `npx wrangler deploy`
-
-## Estructura que debe quedar en GitHub
-
-```text
-/
-├── index.html
-├── tienda.html
-├── producto.html
-├── carrito.html
-├── seguimiento.html
-├── contacto.html
-├── envios.html
-├── aviso-legal.html
-├── privacidad.html
-├── cookies.html
-├── schema.sql
-├── worker.js
-├── wrangler.jsonc
-├── admin/
-│   └── index.html
-└── assets/
-    ├── styles.css
-    ├── app.js
-    ├── admin.js
-    ├── admin-extra.css
-    ├── r2-gallery.css
-    └── partials.txt
-```
-
-## Antes de desplegar
-
-1. Debe existir la D1 `nomapet-db`.
-2. Debe existir el bucket R2 `nomapet-images`.
-3. El Worker debe tener el secret de runtime `ADMIN_TOKEN`.
-4. Mantén el deploy command: `npx wrangler deploy`.
-
-## wrangler.jsonc actual
-
-- Worker: `noma-pet`
-- D1 database ID: `dd15a1c4-0a74-4875-b6a7-04a136fa539a`
-- D1 binding: `DB`
-- R2 bucket: `nomapet-images`
-- R2 binding: `PRODUCT_IMAGES`
-
-## Comprobaciones tras el deploy
-
-- `/api/health`
-- `/api/products`
-- `/admin/`
-- `/tienda.html`
-- abre un producto y comprueba `/producto.html?id=...`
-
-El endpoint `/api/health` debe indicar D1 conectado y R2 disponible.
+Esta versión conserva D1, R2, admin, pedidos y seguimiento, y añade Stripe Checkout en modo TEST.
 
 ## Importante
 
-No subas ningún ADMIN_TOKEN a GitHub. El token solo debe existir como Secret dentro del Worker en Cloudflare.
+Esta fase **rechaza claves live**. `STRIPE_SECRET_KEY` debe empezar por `sk_test_`. Los pedidos creados con Stripe TEST usan IDs `stripe_test_...` y códigos públicos `SNP-...`, por lo que se pueden borrar desde el admin.
 
+## Cloudflare
 
-## Fase 5 — Pedidos + Checkout
+Mantén:
 
-Nuevos archivos:
-- `checkout.html`
-- `pedido-exito.html`
-- `admin/pedidos.html`
-- `assets/checkout.js`
-- `assets/tracking.js`
-- `assets/order-success.js`
-- `assets/admin-orders.js`
-- `assets/orders.css`
+- D1: `nomapet-db` → binding `DB`
+- R2: `nomapet-images` → binding `PRODUCT_IMAGES`
+- Secret: `ADMIN_TOKEN`
+- Deploy command: `npx wrangler deploy`
 
-El checkout público todavía NO cobra dinero.
+Añade como **Secrets de runtime** al Worker `noma-pet`:
 
-Para probar el circuito:
-1. Entra en `/admin/`.
-2. Abre `/admin/pedidos.html`.
-3. Pulsa `+ Crear pedido de prueba`.
-4. El enlace abre `/checkout.html?test=1`.
-5. El checkout utiliza el ADMIN_TOKEN guardado en `sessionStorage`.
-6. El pedido queda guardado en D1 como `test_paid`.
-7. Puedes cambiar estado y tracking desde `/admin/pedidos.html`.
-8. Puedes consultar el pedido desde `/seguimiento.html` usando código + email.
+- `STRIPE_SECRET_KEY` = tu clave secreta TEST `sk_test_...`
+- `STRIPE_WEBHOOK_SECRET` = el signing secret del endpoint `whsec_...`
 
-El Worker crea automáticamente las tablas nuevas `order_addresses` y `order_events`; no es necesario volver a ejecutar `schema.sql` en una base ya existente.
+Nunca subas estas claves a GitHub.
+
+## Webhook Stripe
+
+Endpoint:
+
+`https://TU-WORKER.workers.dev/api/stripe/webhook`
+
+Eventos recomendados para esta fase:
+
+- `checkout.session.completed`
+- `checkout.session.expired`
+- `checkout.session.async_payment_succeeded`
+- `checkout.session.async_payment_failed`
+
+Aunque Checkout está limitado a tarjeta en esta fase, el Worker soporta también los dos eventos async.
+
+## Flujo
+
+1. Cliente rellena `/checkout.html`.
+2. `/api/checkout/create` vuelve a leer productos/precios desde D1.
+3. Se crea pedido pendiente en D1.
+4. Worker crea Checkout Session TEST en Stripe.
+5. Cliente paga en la página alojada por Stripe.
+6. Stripe llama a `/api/stripe/webhook`.
+7. El Worker verifica `Stripe-Signature` sobre el body RAW con HMAC-SHA256 y tolerancia de 5 minutos.
+8. Solo entonces el pedido pasa de `pending` a `paid`.
+9. La página de éxito consulta D1 y espera unos segundos si el webhook aún no ha llegado.
+
+## Prueba
+
+Cuando `/api/health` muestre:
+
+```json
+{
+  "stripe": true,
+  "stripeMode": "test"
+}
+```
+
+añade un producto al carrito, abre checkout y usa una tarjeta TEST de Stripe, por ejemplo `4242 4242 4242 4242`, fecha futura y cualquier CVC de 3 cifras. No uses una tarjeta real.
+
+## No ejecutar schema.sql de nuevo
+
+El Worker crea automáticamente `stripe_webhook_events` si falta. El `schema.sql` se incluye actualizado solo como referencia para instalaciones nuevas.

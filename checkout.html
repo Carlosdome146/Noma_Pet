@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="assets/orders.css">
 </head>
 <body>
-  <div class="topbar" id="checkoutTopbar">CHECKOUT PREPARADO · Pagos todavía desactivados</div>
+  <div class="topbar" id="checkoutTopbar">STRIPE TEST · No se cobra dinero real</div>
   <nav class="nav">
     <div class="container navin">
       <a class="brand" href="index.html"><span class="brandmark">N</span>NÓMA PET</a>
@@ -25,11 +25,9 @@
       <div class="container">
         <span class="eyebrow">Checkout</span>
         <h1>Datos de envío.</h1>
-        <p class="lead">La estructura de pedidos ya está conectada a D1. El cobro con Stripe será la siguiente fase.</p>
+        <p class="lead">Primero guardamos los datos del pedido y después Stripe abre su página segura de pago. Esta fase usa exclusivamente Stripe TEST.</p>
 
-        <div id="testModeNotice" class="notice order-test-notice" hidden>
-          <b>Modo de prueba de administración.</b> Este pedido se guardará en D1 como pedido de prueba y no cobrará dinero.
-        </div>
+        <div id="testModeNotice" class="notice order-test-notice" hidden></div>
 
         <div class="checkout-grid">
           <form class="checkout-card" id="checkoutForm">
@@ -68,8 +66,8 @@
             </div>
 
             <div id="checkoutError" class="form-error" hidden></div>
-            <button id="checkoutSubmit" class="btn primary checkout-submit" type="submit" disabled>Pago online — próxima fase</button>
-            <p class="tiny" id="checkoutHelp">Todavía no se procesa ningún pago real.</p>
+            <button id="checkoutSubmit" class="btn primary checkout-submit" type="submit" disabled>Comprobando Stripe…</button>
+            <p class="tiny" id="checkoutHelp">No utilices una tarjeta real. Usaremos tarjetas de prueba de Stripe.</p>
           </form>
 
           <aside class="summary checkout-summary">

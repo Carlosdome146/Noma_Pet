@@ -68,7 +68,7 @@ function renderOrders(){
   });
   $o("ordersRows").innerHTML=filtered.length?filtered.map(o=>`
     <tr>
-      <td><b>${escO(o.publicCode)}</b>${o.test?'<div class="meta admin-test-order">PRUEBA</div>':""}<div class="meta">${dtO(o.createdAt)} · ${o.itemCount} línea(s)</div></td>
+      <td><b>${escO(o.publicCode)}</b>${o.stripeTest?'<div class="meta admin-test-order">STRIPE TEST</div>':(o.test?'<div class="meta admin-test-order">PRUEBA ADMIN</div>':"")}<div class="meta">${dtO(o.createdAt)} · ${o.itemCount} línea(s)</div></td>
       <td><b>${escO(o.customerName||"—")}</b><div class="meta">${escO(o.customerEmail||"")}</div></td>
       <td><b>${moneyO(o.total,o.currency)}</b></td>
       <td><span class="status ${o.paymentStatus==="test_paid"?"draft":""}">${escO(P_LABEL[o.paymentStatus]||o.paymentStatus)}</span></td>
@@ -98,11 +98,11 @@ async function openOrder(id){
     <div class="admin-order-event"><b>${escO(e.message||e.type)}</b><span>${dtO(e.createdAt)}</span></div>`).join("");
 
   $o("orderDetailBody").innerHTML=`
-    ${o.test?'<div class="order-admin-test-banner">PEDIDO DE PRUEBA · No existe cobro real</div>':""}
+    ${o.stripeTest?'<div class="order-admin-test-banner">STRIPE TEST · No existe cobro real</div>':(o.test?'<div class="order-admin-test-banner">PEDIDO DE PRUEBA ADMIN · No existe cobro real</div>':"")}
     <div class="admin-order-grid">
       <div class="admin-order-box"><span>Cliente</span><b>${escO(o.customerName)}</b><p>${escO(o.customerEmail)}${o.address.phone?`<br>${escO(o.address.phone)}`:""}</p></div>
       <div class="admin-order-box"><span>Entrega</span><b>${escO(o.address.line1||"—")}</b><p>${o.address.line2?escO(o.address.line2)+"<br>":""}${escO(o.address.postalCode)} ${escO(o.address.city)}${o.address.province?`, ${escO(o.address.province)}`:""}</p></div>
-      <div class="admin-order-box"><span>Total</span><b>${moneyO(o.total,o.currency)}</b><p>Pago: ${escO(P_LABEL[o.paymentStatus]||o.paymentStatus)}</p></div>
+      <div class="admin-order-box"><span>Total</span><b>${moneyO(o.total,o.currency)}</b><p>Pago: ${escO(P_LABEL[o.paymentStatus]||o.paymentStatus)}${o.stripeCheckoutSessionId?`<br><span class="meta">Stripe: ${escO(o.stripeCheckoutSessionId)}</span>`:""}${o.stripePaymentIntentId?`<br><span class="meta">PaymentIntent: ${escO(o.stripePaymentIntentId)}</span>`:""}</p></div>
     </div>
     ${o.address.notes?`<div class="notice"><b>Notas cliente:</b> ${escO(o.address.notes)}</div>`:""}
     <h3 class="admin-section-title">Artículos</h3>

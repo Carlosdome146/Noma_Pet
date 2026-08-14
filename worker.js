@@ -426,10 +426,14 @@ async function deleteProductImage(env, productId, imageId) {
 
 
 // ============================================================
-// PEDIDOS / CHECKOUT (FASE 5)
-// En esta fase NO hay pagos reales. Los pedidos de prueba solo
-// pueden crearse con ADMIN_TOKEN desde checkout.html?test=1.
+// PEDIDOS / CHECKOUT + STRIPE TEST (FASE 6)
+// - Pedido manual de prueba protegido por ADMIN_TOKEN.
+// - Checkout Stripe alojado usando exclusivamente sk_test_.
+// - El webhook firmado es la única fuente que marca un pago Stripe como pagado.
 // ============================================================
+
+const STRIPE_API_VERSION = "2026-07-29.dahlia";
+const STRIPE_WEBHOOK_TOLERANCE_SECONDS = 300;
 
 function normalizeEmail(value) {
   return cleanText(value, 254).toLowerCase();
@@ -446,12 +450,38 @@ function randomHex(bytes = 5) {
   return Array.from(arr, x => x.toString(16).padStart(2, "0")).join("").toUpperCase();
 }
 
-function makeTestPublicCode() {
+function datedPublicCode(prefix) {
   const d = new Date();
   const y = String(d.getUTCFullYear());
   const m = String(d.getUTCMonth() + 1).padStart(2, "0");
   const day = String(d.getUTCDate()).padStart(2, "0");
-  return `TNP-${y}${m}${day}-${randomHex(5)}`;
+  return `${prefix}-${y}${m}${day}-${randomHex(5)}`;
+}
+
+function makeTestPublicCode() {
+  return datedPublicCode("TNP");
+}
+
+function makeStripeTestPublicCode() {
+  return datedPublicCode("SNP");
+}
+
+function isTestOrderId(orderId) {
+  const id = String(orderId || "");
+  return id.startsWith("test_") || id.startsWith("stripe_test_");
+}
+
+function isStripeTestOrderId(orderId) {
+  return String(orderId || "").startsWith("stripe_test_");
+}
+
+function stripeTestConfigured(env) {
+  return Boolean(
+    typeof env.STRIPE_SECRET_KEY === "string" &&
+    env.STRIPE_SECRET_KEY.startsWith("sk_test_") &&
+    typeof env.STRIPE_WEBHOOK_SECRET === "string" &&
+    env.STRIPE_WEBHOOK_SECRET.startsWith("whsec_")
+  );
 }
 
 async function ensureOrderSchema(env) {
@@ -480,8 +510,16 @@ async function ensureOrderSchema(env) {
         FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
       )
     `),
+    env.DB.prepare(`
+      CREATE TABLE IF NOT EXISTS stripe_webhook_events (
+        event_id TEXT PRIMARY KEY,
+        event_type TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
+    `),
     env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_order_events_order ON order_events (order_id, created_at)`),
-    env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_orders_email_code ON orders (customer_email, public_code)`)
+    env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_orders_email_code ON orders (customer_email, public_code)`),
+    env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_orders_stripe_session ON orders (stripe_checkout_session_id)`)
   ]);
 }
 
@@ -576,25 +614,17 @@ async function resolveOrderItems(env, rawItems) {
   };
 }
 
-async function createTestOrder(request, env) {
-  await ensureOrderSchema(env);
-  const body = await readJson(request);
-  const customer = cleanCustomer(body);
-  const cart = await resolveOrderItems(env, body.items);
-
-  const orderId = `test_${crypto.randomUUID()}`;
-  const publicCode = makeTestPublicCode();
-
-  const statements = [
+function orderInsertStatements(env, { orderId, publicCode, customer, cart, paymentStatus, eventType, eventMessage }) {
+  return [
     env.DB.prepare(`
       INSERT INTO orders (
         id, public_code, customer_email, customer_name,
         total_cents, currency, payment_status, fulfillment_status,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, 'test_paid', 'pending', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     `).bind(
       orderId, publicCode, customer.email, customer.name,
-      cart.totalCents, cart.currency
+      cart.totalCents, cart.currency, paymentStatus
     ),
     env.DB.prepare(`
       INSERT INTO order_addresses (
@@ -616,11 +646,29 @@ async function createTestOrder(request, env) {
     )),
     env.DB.prepare(`
       INSERT INTO order_events (order_id, event_type, message)
-      VALUES (?, 'created_test', 'Pedido de prueba creado desde el checkout de administración.')
-    `).bind(orderId)
+      VALUES (?, ?, ?)
+    `).bind(orderId, eventType, eventMessage)
   ];
+}
 
-  await env.DB.batch(statements);
+async function createTestOrder(request, env) {
+  await ensureOrderSchema(env);
+  const body = await readJson(request);
+  const customer = cleanCustomer(body);
+  const cart = await resolveOrderItems(env, body.items);
+
+  const orderId = `test_${crypto.randomUUID()}`;
+  const publicCode = makeTestPublicCode();
+
+  await env.DB.batch(orderInsertStatements(env, {
+    orderId,
+    publicCode,
+    customer,
+    cart,
+    paymentStatus: "test_paid",
+    eventType: "created_test",
+    eventMessage: "Pedido de prueba creado desde el checkout de administración."
+  }));
 
   return json({
     ok: true,
@@ -631,9 +679,322 @@ async function createTestOrder(request, env) {
       currency: cart.currency,
       paymentStatus: "test_paid",
       fulfillmentStatus: "pending",
-      test: true
+      test: true,
+      stripeTest: false
     }
   }, { status: 201, headers: { "Cache-Control": "no-store" } });
+}
+
+async function stripeApiPost(env, path, params) {
+  const body = new URLSearchParams();
+  for (const [key, value] of params) {
+    if (value !== undefined && value !== null) body.append(key, String(value));
+  }
+
+  const response = await fetch(`https://api.stripe.com/v1${path}`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${env.STRIPE_SECRET_KEY}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+      "Stripe-Version": STRIPE_API_VERSION
+    },
+    body
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const message = data?.error?.message || `Stripe devolvió HTTP ${response.status}.`;
+    throw new Error(message);
+  }
+  return data;
+}
+
+async function createStripeSession(env, origin, customer, cart, orderId, publicCode) {
+  const params = [
+    ["mode", "payment"],
+    ["locale", "es"],
+    ["submit_type", "pay"],
+    ["payment_method_types[0]", "card"],
+    ["customer_email", customer.email],
+    ["client_reference_id", orderId],
+    ["metadata[order_id]", orderId],
+    ["metadata[public_code]", publicCode],
+    ["payment_intent_data[metadata][order_id]", orderId],
+    ["payment_intent_data[metadata][public_code]", publicCode],
+    ["success_url", `${origin}/pedido-exito.html?code=${encodeURIComponent(publicCode)}&stripe=1&session_id={CHECKOUT_SESSION_ID}`],
+    ["cancel_url", `${origin}/checkout.html?cancel=1`]
+  ];
+
+  cart.items.forEach((item, index) => {
+    params.push(
+      [`line_items[${index}][price_data][currency]`, cart.currency.toLowerCase()],
+      [`line_items[${index}][price_data][product_data][name]`, item.productName],
+      [`line_items[${index}][price_data][unit_amount]`, item.unitPriceCents],
+      [`line_items[${index}][quantity]`, item.quantity]
+    );
+  });
+
+  return stripeApiPost(env, "/checkout/sessions", params);
+}
+
+async function cleanupFailedStripeOrder(env, orderId) {
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM order_events WHERE order_id = ?").bind(orderId),
+    env.DB.prepare("DELETE FROM order_items WHERE order_id = ?").bind(orderId),
+    env.DB.prepare("DELETE FROM order_addresses WHERE order_id = ?").bind(orderId),
+    env.DB.prepare("DELETE FROM orders WHERE id = ?").bind(orderId)
+  ]);
+}
+
+async function createStripeCheckout(request, env, url) {
+  if (!stripeTestConfigured(env)) {
+    return json({
+      ok: false,
+      error: "STRIPE_TEST_NOT_CONFIGURED",
+      message: "Stripe TEST no está completamente configurado. Faltan STRIPE_SECRET_KEY y/o STRIPE_WEBHOOK_SECRET."
+    }, { status: 503, headers: { "Cache-Control": "no-store" } });
+  }
+
+  await ensureOrderSchema(env);
+  const body = await readJson(request);
+  const customer = cleanCustomer(body);
+  const cart = await resolveOrderItems(env, body.items);
+  const orderId = `stripe_test_${crypto.randomUUID()}`;
+  const publicCode = makeStripeTestPublicCode();
+
+  await env.DB.batch(orderInsertStatements(env, {
+    orderId,
+    publicCode,
+    customer,
+    cart,
+    paymentStatus: "pending",
+    eventType: "stripe_checkout_requested",
+    eventMessage: "Checkout Stripe TEST solicitado. Pendiente de pago y confirmación por webhook."
+  }));
+
+  try {
+    const session = await createStripeSession(env, url.origin, customer, cart, orderId, publicCode);
+    if (!session?.id || !session?.url || session.livemode !== false) {
+      throw new Error("Stripe no devolvió una sesión TEST válida.");
+    }
+
+    await env.DB.batch([
+      env.DB.prepare(`
+        UPDATE orders
+        SET stripe_checkout_session_id = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).bind(session.id, orderId),
+      env.DB.prepare(`
+        INSERT INTO order_events (order_id, event_type, message)
+        VALUES (?, 'stripe_session_created', ?)
+      `).bind(orderId, `Sesión Stripe TEST creada: ${session.id}`)
+    ]);
+
+    return json({
+      ok: true,
+      checkoutUrl: session.url,
+      order: {
+        id: orderId,
+        publicCode,
+        total: cart.totalCents / 100,
+        currency: cart.currency,
+        paymentStatus: "pending",
+        fulfillmentStatus: "pending",
+        test: true,
+        stripeTest: true
+      }
+    }, { status: 201, headers: { "Cache-Control": "no-store" } });
+  } catch (error) {
+    await cleanupFailedStripeOrder(env, orderId).catch(cleanupError => console.error("Stripe cleanup error:", cleanupError));
+    throw error;
+  }
+}
+
+function parseStripeSignature(headerValue) {
+  const timestamp = [];
+  const signatures = [];
+  for (const part of String(headerValue || "").split(",")) {
+    const idx = part.indexOf("=");
+    if (idx < 1) continue;
+    const key = part.slice(0, idx).trim();
+    const value = part.slice(idx + 1).trim();
+    if (key === "t") timestamp.push(value);
+    if (key === "v1") signatures.push(value);
+  }
+  return { timestamp: timestamp[0] || "", signatures };
+}
+
+function constantTimeStringEqual(a, b) {
+  const aa = String(a || "");
+  const bb = String(b || "");
+  if (aa.length !== bb.length) return false;
+  let diff = 0;
+  for (let i = 0; i < aa.length; i++) diff |= aa.charCodeAt(i) ^ bb.charCodeAt(i);
+  return diff === 0;
+}
+
+async function hmacSha256Hex(secret, message) {
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(message));
+  return Array.from(new Uint8Array(signature), byte => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function verifyStripeWebhook(rawBody, signatureHeader, secret) {
+  const { timestamp, signatures } = parseStripeSignature(signatureHeader);
+  if (!timestamp || !signatures.length) return false;
+
+  const timestampNumber = Number(timestamp);
+  if (!Number.isFinite(timestampNumber)) return false;
+  const now = Math.floor(Date.now() / 1000);
+  if (Math.abs(now - timestampNumber) > STRIPE_WEBHOOK_TOLERANCE_SECONDS) return false;
+
+  const expected = await hmacSha256Hex(secret, `${timestamp}.${rawBody}`);
+  return signatures.some(signature => constantTimeStringEqual(expected, signature));
+}
+
+function stripeObjectId(value) {
+  if (!value) return null;
+  if (typeof value === "string") return value;
+  if (typeof value === "object" && value.id) return String(value.id);
+  return null;
+}
+
+async function addOrderEvent(env, orderId, eventType, message) {
+  if (!orderId) return;
+  await env.DB.prepare(`
+    INSERT INTO order_events (order_id, event_type, message)
+    VALUES (?, ?, ?)
+  `).bind(orderId, eventType, message).run();
+}
+
+async function applyStripeSessionEvent(env, eventType, session) {
+  const orderId = cleanText(session?.metadata?.order_id || session?.client_reference_id, 160);
+  if (!orderId) return;
+
+  const order = await env.DB.prepare(`
+    SELECT id, total_cents, currency, payment_status
+    FROM orders
+    WHERE id = ?
+    LIMIT 1
+  `).bind(orderId).first();
+  if (!order) return;
+
+  const sessionId = stripeObjectId(session?.id);
+  const paymentIntentId = stripeObjectId(session?.payment_intent);
+
+  if (eventType === "checkout.session.completed" || eventType === "checkout.session.async_payment_succeeded") {
+    const amountMatches = Number(session?.amount_total) === Number(order.total_cents || 0);
+    const currencyMatches = String(session?.currency || "").toUpperCase() === String(order.currency || "EUR").toUpperCase();
+
+    if (!amountMatches || !currencyMatches) {
+      await env.DB.prepare(`
+        UPDATE orders
+        SET payment_status = 'failed', stripe_checkout_session_id = COALESCE(?, stripe_checkout_session_id),
+            stripe_payment_intent_id = COALESCE(?, stripe_payment_intent_id), updated_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND payment_status <> 'paid'
+      `).bind(sessionId, paymentIntentId, orderId).run();
+      await addOrderEvent(env, orderId, "stripe_amount_mismatch", "Stripe confirmó una sesión cuyo importe o moneda no coincide con el pedido. Revisar manualmente.");
+      return;
+    }
+
+    if (session?.payment_status === "paid" || eventType === "checkout.session.async_payment_succeeded") {
+      await env.DB.prepare(`
+        UPDATE orders
+        SET payment_status = 'paid', stripe_checkout_session_id = COALESCE(?, stripe_checkout_session_id),
+            stripe_payment_intent_id = COALESCE(?, stripe_payment_intent_id), updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).bind(sessionId, paymentIntentId, orderId).run();
+      await addOrderEvent(env, orderId, "stripe_paid", "Pago confirmado por webhook firmado de Stripe TEST.");
+      return;
+    }
+
+    await env.DB.prepare(`
+      UPDATE orders
+      SET stripe_checkout_session_id = COALESCE(?, stripe_checkout_session_id),
+          stripe_payment_intent_id = COALESCE(?, stripe_payment_intent_id), updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).bind(sessionId, paymentIntentId, orderId).run();
+    await addOrderEvent(env, orderId, "stripe_completed_pending", "Stripe completó el checkout, pero el pago todavía no figura como pagado.");
+    return;
+  }
+
+  if (eventType === "checkout.session.expired") {
+    await env.DB.prepare(`
+      UPDATE orders
+      SET payment_status = CASE WHEN payment_status = 'paid' THEN payment_status ELSE 'failed' END,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).bind(orderId).run();
+    await addOrderEvent(env, orderId, "stripe_expired", "La sesión Stripe TEST expiró sin pago confirmado.");
+    return;
+  }
+
+  if (eventType === "checkout.session.async_payment_failed") {
+    await env.DB.prepare(`
+      UPDATE orders
+      SET payment_status = CASE WHEN payment_status = 'paid' THEN payment_status ELSE 'failed' END,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).bind(orderId).run();
+    await addOrderEvent(env, orderId, "stripe_payment_failed", "Stripe informó de un pago asíncrono fallido.");
+  }
+}
+
+async function handleStripeWebhook(request, env) {
+  if (!env.STRIPE_WEBHOOK_SECRET || !String(env.STRIPE_WEBHOOK_SECRET).startsWith("whsec_")) {
+    return json({ ok: false, error: "WEBHOOK_SECRET_NOT_CONFIGURED" }, { status: 503 });
+  }
+
+  const signatureHeader = request.headers.get("Stripe-Signature") || "";
+  const rawBody = await request.text();
+  const valid = await verifyStripeWebhook(rawBody, signatureHeader, String(env.STRIPE_WEBHOOK_SECRET));
+  if (!valid) {
+    return json({ ok: false, error: "INVALID_STRIPE_SIGNATURE" }, { status: 400 });
+  }
+
+  let event;
+  try {
+    event = JSON.parse(rawBody);
+  } catch (_) {
+    return json({ ok: false, error: "INVALID_JSON" }, { status: 400 });
+  }
+
+  if (!event?.id || !event?.type) {
+    return json({ ok: false, error: "INVALID_EVENT" }, { status: 400 });
+  }
+  if (event.livemode !== false) {
+    return json({ ok: false, error: "LIVE_EVENT_REJECTED", message: "Esta fase solo acepta eventos Stripe TEST." }, { status: 400 });
+  }
+
+  await ensureOrderSchema(env);
+  const already = await env.DB.prepare("SELECT event_id FROM stripe_webhook_events WHERE event_id = ? LIMIT 1")
+    .bind(event.id).first();
+  if (already) return json({ ok: true, duplicate: true });
+
+  const supported = new Set([
+    "checkout.session.completed",
+    "checkout.session.expired",
+    "checkout.session.async_payment_succeeded",
+    "checkout.session.async_payment_failed"
+  ]);
+
+  if (supported.has(event.type)) {
+    await applyStripeSessionEvent(env, event.type, event.data?.object || {});
+  }
+
+  await env.DB.prepare(`
+    INSERT OR IGNORE INTO stripe_webhook_events (event_id, event_type)
+    VALUES (?, ?)
+  `).bind(event.id, event.type).run();
+
+  return json({ ok: true, received: event.type });
 }
 
 async function listAdminOrders(env) {
@@ -642,7 +1003,8 @@ async function listAdminOrders(env) {
     SELECT
       o.id, o.public_code, o.customer_email, o.customer_name,
       o.total_cents, o.currency, o.payment_status, o.fulfillment_status,
-      o.tracking_code, o.tracking_url, o.created_at, o.updated_at,
+      o.tracking_code, o.tracking_url, o.stripe_checkout_session_id,
+      o.created_at, o.updated_at,
       a.city, a.province, a.country,
       (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.id) AS item_count
     FROM orders o
@@ -668,7 +1030,8 @@ async function listAdminOrders(env) {
     province: row.province || "",
     country: row.country || "ES",
     itemCount: Number(row.item_count || 0),
-    test: String(row.id || "").startsWith("test_")
+    test: isTestOrderId(row.id),
+    stripeTest: isStripeTestOrderId(row.id) && Boolean(row.stripe_checkout_session_id)
   }));
 }
 
@@ -714,9 +1077,12 @@ async function getAdminOrder(env, orderId) {
     fulfillmentStatus: order.fulfillment_status || "pending",
     trackingCode: order.tracking_code || "",
     trackingUrl: order.tracking_url || "",
+    stripeCheckoutSessionId: order.stripe_checkout_session_id || "",
+    stripePaymentIntentId: order.stripe_payment_intent_id || "",
     createdAt: order.created_at,
     updatedAt: order.updated_at,
-    test: String(order.id || "").startsWith("test_"),
+    test: isTestOrderId(order.id),
+    stripeTest: isStripeTestOrderId(order.id),
     address: {
       phone: order.phone || "",
       line1: order.address_line1 || "",
@@ -792,13 +1158,15 @@ async function updateAdminOrder(request, env, orderId) {
 
 async function deleteTestOrder(env, orderId) {
   await ensureOrderSchema(env);
-  if (!String(orderId).startsWith("test_")) {
+  if (!isTestOrderId(orderId)) {
     return json({ ok: false, error: "FORBIDDEN", message: "Solo se pueden borrar pedidos de prueba." }, { status: 403 });
   }
-  const result = await env.DB.prepare("DELETE FROM orders WHERE id = ?").bind(orderId).run();
-  if (!Number(result?.meta?.changes || 0)) {
-    return json({ ok: false, error: "NOT_FOUND", message: "Pedido no encontrado." }, { status: 404 });
-  }
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM order_events WHERE order_id = ?").bind(orderId),
+    env.DB.prepare("DELETE FROM order_items WHERE order_id = ?").bind(orderId),
+    env.DB.prepare("DELETE FROM order_addresses WHERE order_id = ?").bind(orderId),
+    env.DB.prepare("DELETE FROM orders WHERE id = ?").bind(orderId)
+  ]);
   return json({ ok: true }, { headers: { "Cache-Control": "no-store" } });
 }
 
@@ -845,7 +1213,8 @@ async function publicOrderStatus(request, env) {
       trackingUrl: order.tracking_url || "",
       createdAt: order.created_at,
       updatedAt: order.updated_at,
-      test: String(order.id || "").startsWith("test_"),
+      test: isTestOrderId(order.id),
+      stripeTest: isStripeTestOrderId(order.id),
       items: (results || []).map(item => ({
         productName: item.product_name,
         quantity: Number(item.quantity || 0),
@@ -993,7 +1362,7 @@ async function handlePublicApi(request, env, url) {
     try {
       const row = await env.DB.prepare("SELECT COUNT(*) AS total FROM products").first();
       return json(
-        { ok: true, database: "connected", products: Number(row?.total || 0), r2: Boolean(env.PRODUCT_IMAGES), orders: true, stripe: false },
+        { ok: true, database: "connected", products: Number(row?.total || 0), r2: Boolean(env.PRODUCT_IMAGES), orders: true, stripe: stripeTestConfigured(env), stripeMode: stripeTestConfigured(env) ? "test" : "disabled" },
         { headers: { "Cache-Control": "no-store" } }
       );
     } catch (error) {
@@ -1029,6 +1398,24 @@ async function handlePublicApi(request, env, url) {
     }
   }
 
+
+  if (url.pathname === "/api/checkout/create" && request.method === "POST") {
+    try {
+      return await createStripeCheckout(request, env, url);
+    } catch (error) {
+      console.error("Stripe checkout create error:", error);
+      return json({ ok: false, error: "STRIPE_CHECKOUT_ERROR", message: String(error?.message || error) }, { status: 400, headers: { "Cache-Control": "no-store" } });
+    }
+  }
+
+  if (url.pathname === "/api/stripe/webhook" && request.method === "POST") {
+    try {
+      return await handleStripeWebhook(request, env);
+    } catch (error) {
+      console.error("Stripe webhook error:", error);
+      return json({ ok: false, error: "WEBHOOK_PROCESSING_ERROR" }, { status: 500 });
+    }
+  }
 
   if (url.pathname === "/api/order-status" && request.method === "POST") {
     try {

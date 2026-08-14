@@ -8,7 +8,8 @@ const escapeHtml = (s = "") => String(s).replace(/[&<>'"]/g, c => ({ "&":"&amp;"
 
 let products = [];
 let cartRows = [];
-let isTestMode = false;
+let isAdminTestMode = false;
+let stripeTestReady = false;
 let adminToken = "";
 
 function readCart() {
@@ -21,6 +22,13 @@ async function loadProducts() {
   const data = await res.json().catch(() => ({}));
   if (!res.ok || !data.ok || !Array.isArray(data.products)) throw new Error("No se pudo cargar el catálogo.");
   products = data.products;
+}
+
+async function loadHealth() {
+  const res = await fetch("/api/health", { headers: { Accept: "application/json" }, cache: "no-store" });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) return {};
+  return data;
 }
 
 function buildCartRows() {
@@ -54,8 +62,8 @@ function renderSummary() {
 
   totals.innerHTML = `
     <div class="row"><span>Productos</span><b>${money(total)}</b></div>
-    <div class="row"><span>Envío</span><span>Se definirá antes de activar pagos</span></div>
-    <div class="row total"><span>Total provisional</span><span>${money(total)}</span></div>`;
+    <div class="row"><span>Envío</span><span>0,00 € en esta prueba</span></div>
+    <div class="row total"><span>Total</span><span>${money(total)}</span></div>`;
 }
 
 function formPayload() {
@@ -82,41 +90,68 @@ function setError(message = "") {
   el.textContent = message;
 }
 
-async function submitTestOrder(event) {
+function showNotice(html) {
+  const notice = $("testModeNotice");
+  notice.innerHTML = html;
+  notice.hidden = false;
+}
+
+async function submitAdminTest(payload) {
+  const res = await fetch("/api/admin/orders/test", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${adminToken}`
+    },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) throw new Error(data.message || "No se pudo crear el pedido de prueba.");
+
+  localStorage.setItem(LAST_ORDER_EMAIL_KEY, payload.customer.email.trim().toLowerCase());
+  localStorage.removeItem(CART_KEY);
+  location.href = `pedido-exito.html?code=${encodeURIComponent(data.order.publicCode)}&test=1`;
+}
+
+async function submitStripeTest(payload) {
+  const res = await fetch("/api/checkout/create", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok || !data.checkoutUrl) {
+    throw new Error(data.message || "No se pudo iniciar Stripe Checkout.");
+  }
+
+  localStorage.setItem(LAST_ORDER_EMAIL_KEY, payload.customer.email.trim().toLowerCase());
+  location.href = data.checkoutUrl;
+}
+
+async function submitCheckout(event) {
   event.preventDefault();
   setError();
 
-  if (!isTestMode) {
-    setError("El pago online todavía no está activado. En la siguiente fase conectaremos Stripe.");
-    return;
-  }
   if (!cartRows.length) {
     setError("El carrito está vacío.");
     return;
   }
   if (!$("checkoutForm").reportValidity()) return;
 
+  if (!isAdminTestMode && !stripeTestReady) {
+    setError("Stripe TEST todavía no está configurado por completo.");
+    return;
+  }
+
   const button = $("checkoutSubmit");
   button.disabled = true;
   const old = button.textContent;
-  button.textContent = "Creando pedido de prueba…";
+  button.textContent = isAdminTestMode ? "Creando pedido de prueba…" : "Abriendo Stripe…";
 
   try {
     const payload = formPayload();
-    const res = await fetch("/api/admin/orders/test", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${adminToken}`
-      },
-      body: JSON.stringify(payload)
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || !data.ok) throw new Error(data.message || "No se pudo crear el pedido.");
-
-    localStorage.setItem(LAST_ORDER_EMAIL_KEY, payload.customer.email.trim().toLowerCase());
-    localStorage.removeItem(CART_KEY);
-    location.href = `pedido-exito.html?code=${encodeURIComponent(data.order.publicCode)}&test=1`;
+    if (isAdminTestMode) await submitAdminTest(payload);
+    else await submitStripeTest(payload);
   } catch (error) {
     setError(error.message);
     button.disabled = false;
@@ -126,7 +161,8 @@ async function submitTestOrder(event) {
 
 async function init() {
   try {
-    await loadProducts();
+    const [_, health] = await Promise.all([loadProducts(), loadHealth()]);
+    stripeTestReady = health.stripe === true && health.stripeMode === "test";
     buildCartRows();
     renderSummary();
   } catch (error) {
@@ -135,20 +171,35 @@ async function init() {
   }
 
   adminToken = sessionStorage.getItem(ADMIN_TOKEN_KEY) || "";
-  const requestedTest = new URLSearchParams(location.search).get("test") === "1";
-  isTestMode = requestedTest && Boolean(adminToken);
+  const params = new URLSearchParams(location.search);
+  const requestedAdminTest = params.get("test") === "1";
+  const cancelled = params.get("cancel") === "1";
+  isAdminTestMode = requestedAdminTest && Boolean(adminToken);
 
-  if (isTestMode && cartRows.length) {
-    $("testModeNotice").hidden = false;
+  if (cancelled) {
+    showNotice("<b>Pago cancelado.</b> No se ha cobrado nada y tu carrito sigue intacto.");
+  }
+
+  if (isAdminTestMode && cartRows.length) {
+    showNotice("<b>Modo de prueba de administración.</b> Se guardará directamente en D1 y no se abrirá Stripe.");
     $("checkoutTopbar").textContent = "MODO PRUEBA ADMIN · No se cobra dinero";
     $("checkoutSubmit").disabled = false;
     $("checkoutSubmit").textContent = "Crear pedido de prueba";
     $("checkoutHelp").textContent = "Se guardará en D1 con pago TEST y aparecerá en /admin/pedidos.html.";
-  } else if (requestedTest && !adminToken) {
-    setError("Para crear un pedido de prueba, entra primero en /admin/ y vuelve a abrir el checkout desde Pedidos.");
+  } else if (requestedAdminTest && !adminToken) {
+    setError("Para crear un pedido de prueba administrativo, entra primero en /admin/ y vuelve a abrir el checkout desde Pedidos.");
+  } else if (stripeTestReady && cartRows.length) {
+    showNotice("<b>Stripe TEST activo.</b> La pantalla de pago será de Stripe, pero ninguna tarjeta real será cobrada.");
+    $("checkoutTopbar").textContent = "STRIPE TEST · Pago simulado";
+    $("checkoutSubmit").disabled = false;
+    $("checkoutSubmit").textContent = "Pagar con Stripe · TEST";
+    $("checkoutHelp").textContent = "Usa una tarjeta de prueba de Stripe. El pedido solo se marcará pagado cuando llegue el webhook firmado.";
+  } else if (cartRows.length) {
+    setError("Stripe TEST todavía no está listo. Configura STRIPE_SECRET_KEY y STRIPE_WEBHOOK_SECRET en Cloudflare.");
+    $("checkoutSubmit").textContent = "Stripe TEST no configurado";
   }
 
-  $("checkoutForm").addEventListener("submit", submitTestOrder);
+  $("checkoutForm").addEventListener("submit", submitCheckout);
 }
 
 document.addEventListener("DOMContentLoaded", init);

@@ -34,7 +34,7 @@ function renderOrder(order) {
     </div>`).join("");
 
   result.innerHTML = `
-    ${order.test ? '<div class="order-test-chip">PEDIDO DE PRUEBA</div>' : ''}
+    ${order.stripeTest ? '<div class="order-test-chip">STRIPE TEST · NO SE HA COBRADO DINERO REAL</div>' : (order.test ? '<div class="order-test-chip">PEDIDO DE PRUEBA</div>' : '')}
     <div class="order-code">${escT(order.publicCode)}</div>
     <div class="order-status-grid">
       <div><span>Estado</span><b>${escT(STATUS_LABELS[order.fulfillmentStatus] || order.fulfillmentStatus)}</b></div>

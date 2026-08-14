@@ -156,3 +156,13 @@ CREATE TABLE IF NOT EXISTS order_events (
 
 CREATE INDEX IF NOT EXISTS idx_order_events_order ON order_events (order_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_orders_email_code ON orders (customer_email, public_code);
+
+
+-- FASE 6 · Idempotencia de webhooks Stripe.
+CREATE TABLE IF NOT EXISTS stripe_webhook_events (
+  event_id TEXT PRIMARY KEY,
+  event_type TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_orders_stripe_session ON orders (stripe_checkout_session_id);
