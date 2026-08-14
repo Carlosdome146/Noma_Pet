@@ -1,0 +1,47 @@
+NÓMA PET — FASE 5 · PEDIDOS + CHECKOUT
+
+ESTE ZIP ES EL REPOSITORIO COMPLETO.
+No mezcles archivos con fases anteriores: sustituye el contenido del repo por esta versión.
+
+QUÉ AÑADE
+- Checkout con datos de envío.
+- Pedidos guardados en D1.
+- Copia del proveedor/SKU en cada línea del pedido.
+- Panel /admin/pedidos.html.
+- Estados: pendiente, preparando, enviado, entregado, cancelado.
+- Código y URL de seguimiento.
+- Seguimiento público real por número de pedido + email.
+- Página de confirmación.
+- Pedidos de prueba eliminables.
+- Todavía NO hay pagos reales.
+
+NO HAY QUE HACER NADA EN CLOUDFLARE
+- Mantén D1 `nomapet-db`.
+- Mantén R2 `nomapet-images`.
+- Mantén `ADMIN_TOKEN`.
+- Mantén deploy command: npx wrangler deploy.
+- NO hay secretos nuevos en esta fase.
+
+PRUEBA
+1. Sube TODO el ZIP a GitHub.
+2. Espera el deploy.
+3. Comprueba /api/health.
+   Debe indicar: database connected, r2 true, orders true, stripe false.
+4. Entra en /admin/.
+5. En la cabecera pulsa Pedidos.
+6. Añade al carrito uno o dos productos.
+7. Desde /admin/pedidos.html pulsa + Crear pedido de prueba.
+8. Completa los datos y crea el pedido.
+9. Debe aparecer en /admin/pedidos.html.
+10. Ábrelo, cambia a “Enviado” y añade un tracking.
+11. Ve a /seguimiento.html e introduce el código + email.
+12. Debe mostrar el nuevo estado y el tracking.
+
+SIGUIENTE FASE
+Stripe Checkout en modo TEST:
+- STRIPE_SECRET_KEY
+- STRIPE_WEBHOOK_SECRET
+- checkout.session.completed
+- paso de pending a paid
+- creación de pedidos reales
+- decremento de stock finito tras pago

@@ -1,1 +1,45 @@
-<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Seguimiento — NÓMA PET</title><link rel="stylesheet" href="assets/styles.css"></head><body><nav class="nav"><div class="container navin"><a class="brand" href="index.html"><span class="brandmark">N</span>NÓMA PET</a><div class="links"><a href="tienda.html">Tienda</a><a href="contacto.html">Contacto</a></div><div class="actions"><a class="btn primary" href="carrito.html">Carrito <span class="cartbadge">0</span></a></div></div></nav><main><section class="pagehead"><div class="container" style="max-width:760px"><span class="eyebrow">Después de comprar</span><h1>Sigue tu pedido.</h1><p class="lead">En la versión real esta pantalla consultará el tracking guardado en D1.</p><div class="feature"><div class="formgrid"><label class="field full">Número de pedido<input placeholder="Ej. NP-1048"></label><label class="field full">Email<input type="email" placeholder="tu@email.com"></label><div class="field full"><button class="btn primary" onclick="alert('Demo: el seguimiento real se conectará al proveedor/transportista.')">Consultar estado</button></div></div></div></div></section></main><script src="assets/app.js"></script></body></html>
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Seguimiento — NÓMA PET</title>
+  <link rel="stylesheet" href="assets/styles.css">
+  <link rel="stylesheet" href="assets/orders.css">
+</head>
+<body>
+  <nav class="nav">
+    <div class="container navin">
+      <a class="brand" href="index.html"><span class="brandmark">N</span>NÓMA PET</a>
+      <div class="links"><a href="tienda.html">Tienda</a><a href="contacto.html">Contacto</a></div>
+      <div class="actions"><a class="btn primary" href="carrito.html">Carrito <span class="cartbadge">0</span></a></div>
+    </div>
+  </nav>
+  <main>
+    <section class="pagehead">
+      <div class="container tracking-wrap">
+        <span class="eyebrow">Después de comprar</span>
+        <h1>Sigue tu pedido.</h1>
+        <p class="lead">Introduce el número de pedido y el mismo email utilizado durante la compra.</p>
+
+        <form class="feature tracking-form" id="trackingForm">
+          <div class="formgrid">
+            <label class="field full">Número de pedido
+              <input id="trackingCode" required placeholder="Ej. TNP-20260814-ABC1234567" autocomplete="off">
+            </label>
+            <label class="field full">Email
+              <input id="trackingEmail" type="email" required placeholder="tu@email.com" autocomplete="email">
+            </label>
+            <div class="field full"><button class="btn primary" type="submit">Consultar estado</button></div>
+          </div>
+          <div id="trackingError" class="form-error" hidden></div>
+        </form>
+
+        <div id="trackingResult" class="feature order-status-card" hidden></div>
+      </div>
+    </section>
+  </main>
+  <script src="assets/app.js"></script>
+  <script src="assets/tracking.js"></script>
+</body>
+</html>

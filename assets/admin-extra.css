@@ -475,3 +475,39 @@ body.modal-open{
 @media(max-width:480px){
   .r2-dropzone .btn{margin-left:0;width:100%}.r2-drop-icon{width:42px;height:42px}
 }
+
+
+/* FASE 5 · Pedidos */
+.admin-test-order{color:#9a5a26;font-weight:900}
+.order-admin-test-banner{
+  background:#fff0df;color:#8a4a20;border:1px solid #f1d0ae;
+  border-radius:14px;padding:12px 14px;font-weight:900;margin:16px 0;
+}
+.admin-order-modal{width:min(1000px,calc(100% - 32px))}
+.admin-order-grid{display:grid;grid-template-columns:1fr 1fr .65fr;gap:14px;margin-top:20px}
+.admin-order-box{background:#fff;border:1px solid var(--line);border-radius:18px;padding:16px}
+.admin-order-box span{display:block;font-size:12px;color:var(--muted);margin-bottom:6px}
+.admin-order-box b{font-size:17px}
+.admin-order-box p{margin:6px 0 0;color:var(--muted);font-size:14px}
+.admin-order-items{border:1px solid var(--line);border-radius:18px;overflow:hidden}
+.admin-order-item{
+  display:grid;grid-template-columns:1fr auto;gap:4px 16px;
+  padding:14px 16px;background:#fff;border-bottom:1px solid var(--line)
+}
+.admin-order-item:last-child{border-bottom:0}
+.admin-order-item>div:first-child{display:flex;flex-direction:column}
+.admin-order-item span{font-size:12px;color:var(--muted)}
+.admin-order-item .meta{grid-column:1/-1}
+.admin-order-events{display:grid;gap:8px}
+.admin-order-event{
+  display:flex;justify-content:space-between;gap:16px;
+  padding:12px 14px;border-radius:14px;background:#f7f9f8;border:1px solid #e1e5e2
+}
+.admin-order-event span{font-size:12px;color:var(--muted)}
+.order-status-cancelled{background:#fff0ed!important;color:#9c3426!important}
+.order-status-shipped{background:#edf3ff!important;color:#37598d!important}
+.order-status-delivered{background:#e8f2ed!important;color:#24503f!important}
+@media(max-width:760px){
+  .admin-order-grid{grid-template-columns:1fr}
+  .admin-order-event{flex-direction:column;gap:4px}
+}

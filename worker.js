@@ -424,12 +424,469 @@ async function deleteProductImage(env, productId, imageId) {
   return json({ ok: true, images: await listProductImages(env, productId) }, { headers: { "Cache-Control": "no-store" } });
 }
 
+
+// ============================================================
+// PEDIDOS / CHECKOUT (FASE 5)
+// En esta fase NO hay pagos reales. Los pedidos de prueba solo
+// pueden crearse con ADMIN_TOKEN desde checkout.html?test=1.
+// ============================================================
+
+function normalizeEmail(value) {
+  return cleanText(value, 254).toLowerCase();
+}
+
+function safeQuantity(value) {
+  const qty = toInt(value, 0);
+  return Math.max(0, Math.min(qty, 20));
+}
+
+function randomHex(bytes = 5) {
+  const arr = new Uint8Array(bytes);
+  crypto.getRandomValues(arr);
+  return Array.from(arr, x => x.toString(16).padStart(2, "0")).join("").toUpperCase();
+}
+
+function makeTestPublicCode() {
+  const d = new Date();
+  const y = String(d.getUTCFullYear());
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `TNP-${y}${m}${day}-${randomHex(5)}`;
+}
+
+async function ensureOrderSchema(env) {
+  await env.DB.batch([
+    env.DB.prepare(`
+      CREATE TABLE IF NOT EXISTS order_addresses (
+        order_id TEXT PRIMARY KEY,
+        phone TEXT,
+        address_line1 TEXT NOT NULL DEFAULT '',
+        address_line2 TEXT,
+        postal_code TEXT NOT NULL DEFAULT '',
+        city TEXT NOT NULL DEFAULT '',
+        province TEXT,
+        country TEXT NOT NULL DEFAULT 'ES',
+        customer_notes TEXT,
+        FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
+      )
+    `),
+    env.DB.prepare(`
+      CREATE TABLE IF NOT EXISTS order_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_id TEXT NOT NULL,
+        event_type TEXT NOT NULL,
+        message TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
+      )
+    `),
+    env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_order_events_order ON order_events (order_id, created_at)`),
+    env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_orders_email_code ON orders (customer_email, public_code)`)
+  ]);
+}
+
+function cleanCustomer(body = {}) {
+  const customer = body.customer || {};
+  const name = cleanText(customer.name, 180);
+  const email = normalizeEmail(customer.email);
+  const phone = cleanText(customer.phone, 60);
+  const addressLine1 = cleanText(customer.addressLine1, 240);
+  const addressLine2 = nullableText(customer.addressLine2, 240);
+  const postalCode = cleanText(customer.postalCode, 30);
+  const city = cleanText(customer.city, 120);
+  const province = nullableText(customer.province, 120);
+  const country = cleanText(customer.country, 2).toUpperCase() || "ES";
+  const notes = nullableText(customer.notes, 1000);
+
+  if (!name) throw new Error("Introduce el nombre y apellidos.");
+  if (!email || !email.includes("@")) throw new Error("Introduce un email válido.");
+  if (!addressLine1) throw new Error("Introduce la dirección de envío.");
+  if (!postalCode) throw new Error("Introduce el código postal.");
+  if (!city) throw new Error("Introduce la localidad.");
+  if (country !== "ES") throw new Error("En esta primera fase solo preparamos envíos a España.");
+
+  return {
+    name, email, phone, addressLine1, addressLine2,
+    postalCode, city, province, country, notes
+  };
+}
+
+async function resolveOrderItems(env, rawItems) {
+  const normalized = [];
+  for (const raw of Array.isArray(rawItems) ? rawItems : []) {
+    const id = cleanText(raw?.id, 120);
+    const quantity = safeQuantity(raw?.qty);
+    if (!id || quantity < 1) continue;
+    const hit = normalized.find(x => x.id === id);
+    if (hit) hit.quantity = Math.min(20, hit.quantity + quantity);
+    else normalized.push({ id, quantity });
+  }
+
+  if (!normalized.length) throw new Error("El carrito está vacío.");
+  if (normalized.length > 20) throw new Error("El carrito contiene demasiados productos.");
+
+  const statements = normalized.map(item => env.DB.prepare(`
+    SELECT
+      p.id, p.name, p.price_cents, p.currency, p.published,
+      p.stock_mode, p.stock_qty,
+      s.supplier, s.supplier_sku
+    FROM products p
+    LEFT JOIN product_sources s
+      ON s.id = (
+        SELECT MIN(s2.id)
+        FROM product_sources s2
+        WHERE s2.product_id = p.id
+      )
+    WHERE p.id = ?
+    LIMIT 1
+  `).bind(item.id));
+
+  const results = await env.DB.batch(statements);
+  const resolved = [];
+
+  for (let i = 0; i < normalized.length; i++) {
+    const item = normalized[i];
+    const row = results[i]?.results?.[0];
+    if (!row || Number(row.published) !== 1) {
+      throw new Error("Uno de los productos ya no está disponible.");
+    }
+    if (row.stock_mode === "finite" && Number(row.stock_qty || 0) < item.quantity) {
+      throw new Error(`No hay suficientes unidades de “${row.name}”.`);
+    }
+    resolved.push({
+      productId: row.id,
+      productName: row.name,
+      quantity: item.quantity,
+      unitPriceCents: Number(row.price_cents || 0),
+      currency: row.currency || "EUR",
+      supplier: row.supplier || null,
+      supplierSku: row.supplier_sku || null
+    });
+  }
+
+  const currency = resolved[0]?.currency || "EUR";
+  if (resolved.some(x => x.currency !== currency)) {
+    throw new Error("No se pueden mezclar monedas distintas en un mismo pedido.");
+  }
+
+  return {
+    items: resolved,
+    currency,
+    totalCents: resolved.reduce((sum, x) => sum + x.unitPriceCents * x.quantity, 0)
+  };
+}
+
+async function createTestOrder(request, env) {
+  await ensureOrderSchema(env);
+  const body = await readJson(request);
+  const customer = cleanCustomer(body);
+  const cart = await resolveOrderItems(env, body.items);
+
+  const orderId = `test_${crypto.randomUUID()}`;
+  const publicCode = makeTestPublicCode();
+
+  const statements = [
+    env.DB.prepare(`
+      INSERT INTO orders (
+        id, public_code, customer_email, customer_name,
+        total_cents, currency, payment_status, fulfillment_status,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, 'test_paid', 'pending', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    `).bind(
+      orderId, publicCode, customer.email, customer.name,
+      cart.totalCents, cart.currency
+    ),
+    env.DB.prepare(`
+      INSERT INTO order_addresses (
+        order_id, phone, address_line1, address_line2, postal_code,
+        city, province, country, customer_notes
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      orderId, customer.phone || null, customer.addressLine1, customer.addressLine2,
+      customer.postalCode, customer.city, customer.province, customer.country, customer.notes
+    ),
+    ...cart.items.map(item => env.DB.prepare(`
+      INSERT INTO order_items (
+        order_id, product_id, product_name, quantity, unit_price_cents,
+        supplier, supplier_sku
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      orderId, item.productId, item.productName, item.quantity,
+      item.unitPriceCents, item.supplier, item.supplierSku
+    )),
+    env.DB.prepare(`
+      INSERT INTO order_events (order_id, event_type, message)
+      VALUES (?, 'created_test', 'Pedido de prueba creado desde el checkout de administración.')
+    `).bind(orderId)
+  ];
+
+  await env.DB.batch(statements);
+
+  return json({
+    ok: true,
+    order: {
+      id: orderId,
+      publicCode,
+      total: cart.totalCents / 100,
+      currency: cart.currency,
+      paymentStatus: "test_paid",
+      fulfillmentStatus: "pending",
+      test: true
+    }
+  }, { status: 201, headers: { "Cache-Control": "no-store" } });
+}
+
+async function listAdminOrders(env) {
+  await ensureOrderSchema(env);
+  const { results } = await env.DB.prepare(`
+    SELECT
+      o.id, o.public_code, o.customer_email, o.customer_name,
+      o.total_cents, o.currency, o.payment_status, o.fulfillment_status,
+      o.tracking_code, o.tracking_url, o.created_at, o.updated_at,
+      a.city, a.province, a.country,
+      (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.id) AS item_count
+    FROM orders o
+    LEFT JOIN order_addresses a ON a.order_id = o.id
+    ORDER BY o.created_at DESC
+    LIMIT 250
+  `).all();
+
+  return (results || []).map(row => ({
+    id: row.id,
+    publicCode: row.public_code,
+    customerEmail: row.customer_email || "",
+    customerName: row.customer_name || "",
+    total: Number(row.total_cents || 0) / 100,
+    currency: row.currency || "EUR",
+    paymentStatus: row.payment_status || "pending",
+    fulfillmentStatus: row.fulfillment_status || "pending",
+    trackingCode: row.tracking_code || "",
+    trackingUrl: row.tracking_url || "",
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    city: row.city || "",
+    province: row.province || "",
+    country: row.country || "ES",
+    itemCount: Number(row.item_count || 0),
+    test: String(row.id || "").startsWith("test_")
+  }));
+}
+
+async function getAdminOrder(env, orderId) {
+  await ensureOrderSchema(env);
+  const order = await env.DB.prepare(`
+    SELECT
+      o.*,
+      a.phone, a.address_line1, a.address_line2, a.postal_code,
+      a.city, a.province, a.country, a.customer_notes
+    FROM orders o
+    LEFT JOIN order_addresses a ON a.order_id = o.id
+    WHERE o.id = ?
+    LIMIT 1
+  `).bind(orderId).first();
+
+  if (!order) return null;
+
+  const [itemsResult, eventsResult] = await env.DB.batch([
+    env.DB.prepare(`
+      SELECT id, product_id, product_name, quantity, unit_price_cents,
+             supplier, supplier_sku
+      FROM order_items
+      WHERE order_id = ?
+      ORDER BY id ASC
+    `).bind(orderId),
+    env.DB.prepare(`
+      SELECT id, event_type, message, created_at
+      FROM order_events
+      WHERE order_id = ?
+      ORDER BY created_at DESC, id DESC
+    `).bind(orderId)
+  ]);
+
+  return {
+    id: order.id,
+    publicCode: order.public_code,
+    customerEmail: order.customer_email || "",
+    customerName: order.customer_name || "",
+    total: Number(order.total_cents || 0) / 100,
+    currency: order.currency || "EUR",
+    paymentStatus: order.payment_status || "pending",
+    fulfillmentStatus: order.fulfillment_status || "pending",
+    trackingCode: order.tracking_code || "",
+    trackingUrl: order.tracking_url || "",
+    createdAt: order.created_at,
+    updatedAt: order.updated_at,
+    test: String(order.id || "").startsWith("test_"),
+    address: {
+      phone: order.phone || "",
+      line1: order.address_line1 || "",
+      line2: order.address_line2 || "",
+      postalCode: order.postal_code || "",
+      city: order.city || "",
+      province: order.province || "",
+      country: order.country || "ES",
+      notes: order.customer_notes || ""
+    },
+    items: (itemsResult.results || []).map(item => ({
+      id: Number(item.id),
+      productId: item.product_id,
+      productName: item.product_name,
+      quantity: Number(item.quantity || 0),
+      unitPrice: Number(item.unit_price_cents || 0) / 100,
+      supplier: item.supplier || "",
+      supplierSku: item.supplier_sku || ""
+    })),
+    events: (eventsResult.results || []).map(event => ({
+      id: Number(event.id),
+      type: event.event_type,
+      message: event.message || "",
+      createdAt: event.created_at
+    }))
+  };
+}
+
+async function updateAdminOrder(request, env, orderId) {
+  await ensureOrderSchema(env);
+  const body = await readJson(request);
+  const allowed = new Set(["pending", "processing", "shipped", "delivered", "cancelled"]);
+  const fulfillmentStatus = cleanText(body.fulfillmentStatus, 30);
+  if (!allowed.has(fulfillmentStatus)) {
+    return json({ ok: false, error: "INVALID_STATUS", message: "Estado de pedido no válido." }, { status: 400 });
+  }
+
+  const trackingCode = nullableText(body.trackingCode, 180);
+  const trackingUrl = nullableText(body.trackingUrl, 1200);
+
+  const current = await env.DB.prepare(`
+    SELECT id, fulfillment_status FROM orders WHERE id = ? LIMIT 1
+  `).bind(orderId).first();
+  if (!current) {
+    return json({ ok: false, error: "NOT_FOUND", message: "Pedido no encontrado." }, { status: 404 });
+  }
+
+  const statements = [
+    env.DB.prepare(`
+      UPDATE orders
+      SET fulfillment_status = ?, tracking_code = ?, tracking_url = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).bind(fulfillmentStatus, trackingCode, trackingUrl, orderId)
+  ];
+
+  if (current.fulfillment_status !== fulfillmentStatus) {
+    statements.push(env.DB.prepare(`
+      INSERT INTO order_events (order_id, event_type, message)
+      VALUES (?, 'fulfillment_updated', ?)
+    `).bind(orderId, `Estado actualizado: ${fulfillmentStatus}`));
+  }
+
+  if (trackingCode || trackingUrl) {
+    statements.push(env.DB.prepare(`
+      INSERT INTO order_events (order_id, event_type, message)
+      VALUES (?, 'tracking_updated', 'Datos de seguimiento actualizados.')
+    `).bind(orderId));
+  }
+
+  await env.DB.batch(statements);
+  return json({ ok: true, order: await getAdminOrder(env, orderId) }, { headers: { "Cache-Control": "no-store" } });
+}
+
+async function deleteTestOrder(env, orderId) {
+  await ensureOrderSchema(env);
+  if (!String(orderId).startsWith("test_")) {
+    return json({ ok: false, error: "FORBIDDEN", message: "Solo se pueden borrar pedidos de prueba." }, { status: 403 });
+  }
+  const result = await env.DB.prepare("DELETE FROM orders WHERE id = ?").bind(orderId).run();
+  if (!Number(result?.meta?.changes || 0)) {
+    return json({ ok: false, error: "NOT_FOUND", message: "Pedido no encontrado." }, { status: 404 });
+  }
+  return json({ ok: true }, { headers: { "Cache-Control": "no-store" } });
+}
+
+async function publicOrderStatus(request, env) {
+  await ensureOrderSchema(env);
+  const body = await readJson(request);
+  const publicCode = cleanText(body.publicCode ?? body.code, 80).toUpperCase();
+  const email = normalizeEmail(body.email);
+
+  if (!publicCode || !email) {
+    return json({ ok: false, error: "MISSING_FIELDS", message: "Introduce número de pedido y email." }, { status: 400 });
+  }
+
+  const order = await env.DB.prepare(`
+    SELECT id, public_code, customer_name, customer_email,
+           total_cents, currency, payment_status, fulfillment_status,
+           tracking_code, tracking_url, created_at, updated_at
+    FROM orders
+    WHERE UPPER(public_code) = ? AND LOWER(customer_email) = ?
+    LIMIT 1
+  `).bind(publicCode, email).first();
+
+  if (!order) {
+    return json({ ok: false, error: "NOT_FOUND", message: "No encontramos un pedido con esos datos." }, { status: 404 });
+  }
+
+  const { results } = await env.DB.prepare(`
+    SELECT product_name, quantity, unit_price_cents
+    FROM order_items
+    WHERE order_id = ?
+    ORDER BY id ASC
+  `).bind(order.id).all();
+
+  return json({
+    ok: true,
+    order: {
+      publicCode: order.public_code,
+      customerName: order.customer_name || "",
+      total: Number(order.total_cents || 0) / 100,
+      currency: order.currency || "EUR",
+      paymentStatus: order.payment_status || "pending",
+      fulfillmentStatus: order.fulfillment_status || "pending",
+      trackingCode: order.tracking_code || "",
+      trackingUrl: order.tracking_url || "",
+      createdAt: order.created_at,
+      updatedAt: order.updated_at,
+      test: String(order.id || "").startsWith("test_"),
+      items: (results || []).map(item => ({
+        productName: item.product_name,
+        quantity: Number(item.quantity || 0),
+        unitPrice: Number(item.unit_price_cents || 0) / 100
+      }))
+    }
+  }, { headers: { "Cache-Control": "no-store" } });
+}
+
+
 async function handleAdminApi(request, env, url) {
   const denied = await requireAdmin(request, env);
   if (denied) return denied;
 
   if (url.pathname === "/api/admin/session" && request.method === "GET") {
     return json({ ok: true, r2: Boolean(env.PRODUCT_IMAGES) }, { headers: { "Cache-Control": "no-store" } });
+  }
+
+  if (url.pathname === "/api/admin/orders/test" && request.method === "POST") {
+    return createTestOrder(request, env);
+  }
+
+  if (url.pathname === "/api/admin/orders" && request.method === "GET") {
+    return json({ ok: true, orders: await listAdminOrders(env) }, { headers: { "Cache-Control": "no-store" } });
+  }
+
+  const orderMatch = url.pathname.match(/^\/api\/admin\/orders\/([^/]+)$/);
+  const adminOrderId = orderMatch ? decodeURIComponent(orderMatch[1]) : "";
+
+  if (adminOrderId && request.method === "GET") {
+    const order = await getAdminOrder(env, adminOrderId);
+    if (!order) return json({ ok: false, error: "NOT_FOUND", message: "Pedido no encontrado." }, { status: 404 });
+    return json({ ok: true, order }, { headers: { "Cache-Control": "no-store" } });
+  }
+
+  if (adminOrderId && request.method === "PUT") {
+    return updateAdminOrder(request, env, adminOrderId);
+  }
+
+  if (adminOrderId && request.method === "DELETE") {
+    return deleteTestOrder(env, adminOrderId);
   }
 
   const imageOrderMatch = url.pathname.match(/^\/api\/admin\/products\/([^/]+)\/images\/order$/);
@@ -536,7 +993,7 @@ async function handlePublicApi(request, env, url) {
     try {
       const row = await env.DB.prepare("SELECT COUNT(*) AS total FROM products").first();
       return json(
-        { ok: true, database: "connected", products: Number(row?.total || 0), r2: Boolean(env.PRODUCT_IMAGES) },
+        { ok: true, database: "connected", products: Number(row?.total || 0), r2: Boolean(env.PRODUCT_IMAGES), orders: true, stripe: false },
         { headers: { "Cache-Control": "no-store" } }
       );
     } catch (error) {
@@ -569,6 +1026,15 @@ async function handlePublicApi(request, env, url) {
         { ok: false, error: "DATABASE_UNAVAILABLE", detail: String(error?.message || error) },
         { status: 503, headers: { "Cache-Control": "no-store" } }
       );
+    }
+  }
+
+
+  if (url.pathname === "/api/order-status" && request.method === "POST") {
+    try {
+      return await publicOrderStatus(request, env);
+    } catch (error) {
+      return json({ ok: false, error: "BAD_REQUEST", message: String(error?.message || error) }, { status: 400 });
     }
   }
 
@@ -618,7 +1084,7 @@ export default {
         return await handleMedia(request, env, url);
       }
 
-      if (url.pathname === "/api/admin/session" || url.pathname.startsWith("/api/admin/products")) {
+      if (url.pathname.startsWith("/api/admin/")) {
         return await handleAdminApi(request, env, url);
       }
 

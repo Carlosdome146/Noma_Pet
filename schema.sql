@@ -127,3 +127,32 @@ INSERT INTO product_sources
 (product_id, supplier, supplier_sku, supplier_url, product_cost_cents, cost_currency, warehouse, stock_status, compliance_status, notes, checked_at)
 SELECT 'glove','CJdropshipping','CJYD233200801AZ','https://cjdropshipping.com/product/pet-hair-remover-mitt-pet-hair-remover-gloves-deshedding-brush-glove-for-dog-cat-rabbit-with-long-short-curly-hair-p-2503191148021601200.html',57,'USD',NULL,'unknown','pending','Rango visible $0.57–6.96 según cantidad/variante.','2026-08-14'
 WHERE NOT EXISTS (SELECT 1 FROM product_sources WHERE supplier='CJdropshipping' AND supplier_sku='CJYD233200801AZ');
+
+
+-- FASE 5 · Datos de envío y trazabilidad del pedido.
+-- El Worker también crea estas tablas con CREATE TABLE IF NOT EXISTS,
+-- por lo que NO hace falta volver a ejecutar schema.sql en una D1 ya creada.
+CREATE TABLE IF NOT EXISTS order_addresses (
+  order_id TEXT PRIMARY KEY,
+  phone TEXT,
+  address_line1 TEXT NOT NULL DEFAULT '',
+  address_line2 TEXT,
+  postal_code TEXT NOT NULL DEFAULT '',
+  city TEXT NOT NULL DEFAULT '',
+  province TEXT,
+  country TEXT NOT NULL DEFAULT 'ES',
+  customer_notes TEXT,
+  FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS order_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  message TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_order_events_order ON order_events (order_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_orders_email_code ON orders (customer_email, public_code);

@@ -14,3 +14,6 @@ RECUPERACIÓN LIMPIA DEL REPOSITORIO
    /admin/
    /tienda.html
 6. Si ves CSS antiguo, haz Ctrl+F5.
+
+
+FASE 5: también deben existir checkout.html, pedido-exito.html, admin/pedidos.html y los JS/CSS de pedidos.

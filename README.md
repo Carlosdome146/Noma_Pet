@@ -1,6 +1,6 @@
 # NÓMA PET — repositorio completo actual
 
-Este ZIP es una reconstrucción limpia del proyecto en el estado actual.
+Este ZIP contiene el proyecto completo actualizado hasta la Fase 5 (pedidos + checkout de prueba).
 
 ## Arquitectura
 
@@ -68,3 +68,30 @@ El endpoint `/api/health` debe indicar D1 conectado y R2 disponible.
 ## Importante
 
 No subas ningún ADMIN_TOKEN a GitHub. El token solo debe existir como Secret dentro del Worker en Cloudflare.
+
+
+## Fase 5 — Pedidos + Checkout
+
+Nuevos archivos:
+- `checkout.html`
+- `pedido-exito.html`
+- `admin/pedidos.html`
+- `assets/checkout.js`
+- `assets/tracking.js`
+- `assets/order-success.js`
+- `assets/admin-orders.js`
+- `assets/orders.css`
+
+El checkout público todavía NO cobra dinero.
+
+Para probar el circuito:
+1. Entra en `/admin/`.
+2. Abre `/admin/pedidos.html`.
+3. Pulsa `+ Crear pedido de prueba`.
+4. El enlace abre `/checkout.html?test=1`.
+5. El checkout utiliza el ADMIN_TOKEN guardado en `sessionStorage`.
+6. El pedido queda guardado en D1 como `test_paid`.
+7. Puedes cambiar estado y tracking desde `/admin/pedidos.html`.
+8. Puedes consultar el pedido desde `/seguimiento.html` usando código + email.
+
+El Worker crea automáticamente las tablas nuevas `order_addresses` y `order_events`; no es necesario volver a ejecutar `schema.sql` en una base ya existente.

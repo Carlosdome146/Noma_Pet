@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Checkout — NÓMA PET</title>
+  <link rel="stylesheet" href="assets/styles.css">
+  <link rel="stylesheet" href="assets/orders.css">
+</head>
+<body>
+  <div class="topbar" id="checkoutTopbar">CHECKOUT PREPARADO · Pagos todavía desactivados</div>
+  <nav class="nav">
+    <div class="container navin">
+      <a class="brand" href="index.html"><span class="brandmark">N</span>NÓMA PET</a>
+      <div class="links">
+        <a href="tienda.html">Tienda</a>
+        <a href="carrito.html">Carrito</a>
+      </div>
+      <div class="actions"><a class="btn secondary" href="carrito.html">← Volver</a></div>
+    </div>
+  </nav>
+
+  <main>
+    <section class="pagehead">
+      <div class="container">
+        <span class="eyebrow">Checkout</span>
+        <h1>Datos de envío.</h1>
+        <p class="lead">La estructura de pedidos ya está conectada a D1. El cobro con Stripe será la siguiente fase.</p>
+
+        <div id="testModeNotice" class="notice order-test-notice" hidden>
+          <b>Modo de prueba de administración.</b> Este pedido se guardará en D1 como pedido de prueba y no cobrará dinero.
+        </div>
+
+        <div class="checkout-grid">
+          <form class="checkout-card" id="checkoutForm">
+            <h2>Contacto y entrega</h2>
+            <div class="formgrid">
+              <label class="field full">Nombre y apellidos *
+                <input id="customerName" autocomplete="name" required maxlength="180">
+              </label>
+              <label class="field">Email *
+                <input id="customerEmail" type="email" autocomplete="email" required maxlength="254">
+              </label>
+              <label class="field">Teléfono
+                <input id="customerPhone" type="tel" autocomplete="tel" maxlength="60">
+              </label>
+              <label class="field full">Dirección *
+                <input id="addressLine1" autocomplete="address-line1" required maxlength="240">
+              </label>
+              <label class="field full">Piso, puerta, etc.
+                <input id="addressLine2" autocomplete="address-line2" maxlength="240">
+              </label>
+              <label class="field">Código postal *
+                <input id="postalCode" autocomplete="postal-code" required maxlength="30">
+              </label>
+              <label class="field">Localidad *
+                <input id="city" autocomplete="address-level2" required maxlength="120">
+              </label>
+              <label class="field">Provincia
+                <input id="province" autocomplete="address-level1" maxlength="120">
+              </label>
+              <label class="field">País
+                <select id="country"><option value="ES">España</option></select>
+              </label>
+              <label class="field full">Notas para el pedido
+                <textarea id="orderNotes" rows="3" maxlength="1000" placeholder="Opcional"></textarea>
+              </label>
+            </div>
+
+            <div id="checkoutError" class="form-error" hidden></div>
+            <button id="checkoutSubmit" class="btn primary checkout-submit" type="submit" disabled>Pago online — próxima fase</button>
+            <p class="tiny" id="checkoutHelp">Todavía no se procesa ningún pago real.</p>
+          </form>
+
+          <aside class="summary checkout-summary">
+            <h3>Tu pedido</h3>
+            <div id="checkoutItems"></div>
+            <div id="checkoutTotals"></div>
+          </aside>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="assets/checkout.js"></script>
+</body>
+</html>
