@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Administración — NÓMA PET</title>
+  <link rel="stylesheet" href="../assets/styles.css">
+  <link rel="stylesheet" href="../assets/admin-extra.css">
+  <meta name="robots" content="noindex,nofollow,noarchive">
+</head>
+<body class="admin">
+  <header class="adminbar">
+    <div class="container navin admin-nav">
+      <a class="brand" href="../index.html"><span class="brandmark">N</span>NÓMA PET / ADMIN</a>
+      <div class="actions">
+        <a class="btn secondary" href="../index.html" target="_blank" rel="noopener">Ver tienda</a>
+        <button class="btn admin-logout" id="logoutBtn" type="button" hidden>Salir</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="container adminpanel">
+    <section id="loginView" class="admin-login">
+      <div class="admin-login-card">
+        <span class="eyebrow">Acceso privado</span>
+        <h1>Administración</h1>
+        <p class="lead">Introduce el token privado que has configurado en Cloudflare como <b>ADMIN_TOKEN</b>.</p>
+        <form id="loginForm">
+          <div class="field">
+            <label for="adminToken">Token de administración</label>
+            <input id="adminToken" type="password" autocomplete="current-password" required autofocus>
+          </div>
+          <button class="btn primary" type="submit" style="width:100%;margin-top:14px">Entrar</button>
+          <p id="loginError" class="form-error" hidden></p>
+        </form>
+      </div>
+    </section>
+
+    <section id="dashboardView" hidden>
+      <div class="admin-titlebar">
+        <div>
+          <span class="eyebrow">D1 conectado</span>
+          <h1>Productos</h1>
+          <p class="lead">Gestiona el catálogo sin modificar código ni volver a ejecutar SQL.</p>
+        </div>
+        <button class="btn primary" id="newProductBtn" type="button">+ Nuevo producto</button>
+      </div>
+
+      <div class="kpis">
+        <div class="kpi"><span class="meta">Productos</span><b id="kpiTotal">0</b></div>
+        <div class="kpi"><span class="meta">Publicados</span><b id="kpiPublished">0</b></div>
+        <div class="kpi"><span class="meta">Borradores</span><b id="kpiDrafts">0</b></div>
+        <div class="kpi"><span class="meta">Con proveedor</span><b id="kpiSupplier">0</b></div>
+      </div>
+
+      <div class="admin-tools">
+        <input id="searchInput" type="search" placeholder="Buscar producto, categoría o SKU…">
+        <select id="statusFilter">
+          <option value="all">Todos</option>
+          <option value="published">Publicados</option>
+          <option value="draft">Borradores</option>
+        </select>
+      </div>
+
+      <div id="adminMessage" class="admin-message" hidden></div>
+
+      <div class="tablewrap">
+        <table class="table admin-table">
+          <thead>
+            <tr>
+              <th>Producto</th>
+              <th>Categoría</th>
+              <th>PVP</th>
+              <th>Proveedor</th>
+              <th>Estado</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="adminRows"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <div class="admin-modal" id="productModal" aria-hidden="true">
+    <div class="admin-modal-backdrop" data-close-modal></div>
+    <div class="admin-modal-card" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <div class="admin-modal-head">
+        <div>
+          <span class="eyebrow">Catálogo D1</span>
+          <h2 id="modalTitle">Nuevo producto</h2>
+        </div>
+        <button class="admin-close" type="button" data-close-modal aria-label="Cerrar">×</button>
+      </div>
+
+      <form id="productForm">
+        <input id="editId" type="hidden">
+        <input id="sourceId" type="hidden">
+
+        <h3 class="admin-section-title">Producto</h3>
+        <div class="formgrid">
+          <div class="field full"><label>Nombre *</label><input id="name" required maxlength="180"></div>
+          <div class="field"><label>Slug</label><input id="slug" maxlength="120" placeholder="se genera automáticamente"></div>
+          <div class="field"><label>ID</label><input id="productId" maxlength="120" placeholder="solo al crear"></div>
+          <div class="field"><label>Categoría *</label>
+            <select id="category" required>
+              <option value="paseo">Paseo</option>
+              <option value="viaje">Viaje</option>
+              <option value="limpieza">Limpieza</option>
+              <option value="hogar">Hogar</option>
+            </select>
+          </div>
+          <div class="field"><label>Etiqueta</label><input id="tag" maxlength="50" placeholder="TOP, VIAJE…"></div>
+          <div class="field"><label>Emoji</label><input id="emoji" maxlength="12" value="🐾"></div>
+          <div class="field"><label>Precio PVP (€) *</label><input id="price" type="number" min="0" step="0.01" required></div>
+          <div class="field"><label>Orden</label><input id="sortOrder" type="number" step="1" value="0"></div>
+          <div class="field"><label>Stock</label>
+            <select id="stockMode">
+              <option value="supplier">Proveedor</option>
+              <option value="finite">Finito</option>
+              <option value="unlimited">Ilimitado</option>
+            </select>
+          </div>
+          <div class="field"><label>Unidades</label><input id="stockQty" type="number" min="0" step="1" disabled></div>
+          <div class="field full"><label>Descripción corta</label><textarea id="shortDesc" rows="2" maxlength="360"></textarea></div>
+          <div class="field full"><label>Descripción completa</label><textarea id="description" rows="5"></textarea></div>
+          <label class="admin-check full"><input id="published" type="checkbox"> <span>Publicado en la tienda</span></label>
+        </div>
+
+        <h3 class="admin-section-title">Imágenes <span>(Cloudflare R2 · máximo 8)</span></h3>
+        <input id="legacyImageUrl" type="hidden">
+        <div class="r2-dropzone" id="imageDropzone" tabindex="0" role="button" aria-label="Subir imágenes">
+          <input id="imageFiles" type="file" accept="image/jpeg,image/png,image/webp,image/avif" multiple hidden>
+          <div class="r2-drop-icon">↥</div>
+          <div>
+            <b>Arrastra aquí las fotos</b>
+            <p>o pulsa para seleccionarlas · JPG, PNG, WebP o AVIF · hasta 8 MB por foto</p>
+          </div>
+          <button class="btn secondary" id="selectImagesBtn" type="button">Seleccionar fotos</button>
+        </div>
+        <p class="meta r2-help" id="imageUploadHint">La primera imagen será la principal de la tienda. Puedes reordenarlas, marcar otra como principal o eliminarlas.</p>
+        <div class="r2-image-grid" id="imageList"></div>
+        <div id="imageError" class="form-error" hidden></div>
+
+
+        <h3 class="admin-section-title">Proveedor <span>(interno, no visible al cliente)</span></h3>
+        <div class="formgrid">
+          <div class="field"><label>Proveedor</label><input id="supplier" maxlength="160"></div>
+          <div class="field"><label>SKU proveedor</label><input id="supplierSku" maxlength="180"></div>
+          <div class="field full"><label>URL proveedor</label><input id="supplierUrl" type="url"></div>
+          <div class="field"><label>Coste producto</label><input id="productCost" type="number" min="0" step="0.01"></div>
+          <div class="field"><label>Coste envío</label><input id="shippingCost" type="number" min="0" step="0.01"></div>
+          <div class="field"><label>Moneda coste</label>
+            <select id="costCurrency"><option>EUR</option><option>USD</option></select>
+          </div>
+          <div class="field"><label>Almacén</label><input id="warehouse" placeholder="España, Alemania, China…"></div>
+          <div class="field"><label>Stock proveedor</label>
+            <select id="stockStatus">
+              <option value="unknown">Sin comprobar</option>
+              <option value="in_stock">En stock</option>
+              <option value="low">Stock bajo</option>
+              <option value="out">Sin stock</option>
+            </select>
+          </div>
+          <div class="field"><label>Cumplimiento</label>
+            <select id="complianceStatus">
+              <option value="pending">Pendiente</option>
+              <option value="review">En revisión</option>
+              <option value="approved">Aprobado</option>
+              <option value="rejected">Rechazado</option>
+            </select>
+          </div>
+          <div class="field"><label>Envío mín. días</label><input id="shippingDaysMin" type="number" min="0" step="1"></div>
+          <div class="field"><label>Envío máx. días</label><input id="shippingDaysMax" type="number" min="0" step="1"></div>
+          <div class="field full"><label>Notas internas</label><textarea id="sourceNotes" rows="3"></textarea></div>
+        </div>
+
+        <div id="formError" class="form-error" hidden></div>
+        <div class="admin-modal-actions">
+          <button class="btn danger" id="deleteBtn" type="button" hidden>Eliminar producto</button>
+          <div class="admin-modal-actions-right">
+            <button class="btn secondary" type="button" data-close-modal>Cancelar</button>
+            <button class="btn primary" id="saveBtn" type="submit">Guardar</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="../assets/admin.js"></script>
+</body>
+</html>

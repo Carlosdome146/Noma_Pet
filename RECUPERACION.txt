@@ -1,0 +1,16 @@
+RECUPERACIÓN LIMPIA DEL REPOSITORIO
+
+1. En GitHub, deja únicamente los archivos/carpetas incluidos en este ZIP.
+2. Asegúrate de NO conservar:
+   - wrangler.toml
+   - functions/
+   - versiones duplicadas de app.js
+   - archivos antiguos de admin
+3. Sube todo el contenido de este ZIP a la raíz del repositorio.
+4. Cloudflare debe ejecutar:
+   npx wrangler deploy
+5. Comprueba:
+   /api/health
+   /admin/
+   /tienda.html
+6. Si ves CSS antiguo, haz Ctrl+F5.
