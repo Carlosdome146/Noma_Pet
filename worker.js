@@ -1,4 +1,13 @@
 const JSON_HEADERS = { "Content-Type": "application/json; charset=utf-8" };
+const MAX_IMAGES_PER_PRODUCT = 8;
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/avif"]);
+const IMAGE_EXTENSIONS = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "image/avif": "avif"
+};
 
 function json(data, init = {}) {
   const headers = new Headers(init.headers || {});
@@ -127,6 +136,23 @@ async function requireAdmin(request, env) {
   return null;
 }
 
+function mediaUrl(objectKey) {
+  return "/media/" + String(objectKey)
+    .split("/")
+    .map(part => encodeURIComponent(part))
+    .join("/");
+}
+
+function imageDto(row) {
+  return {
+    id: Number(row.id),
+    url: mediaUrl(row.object_key),
+    objectKey: row.object_key,
+    alt: row.alt_text || "",
+    sortOrder: Number(row.sort_order || 0)
+  };
+}
+
 function mapPublicProduct(p) {
   return {
     id: p.id,
@@ -199,6 +225,39 @@ const ADMIN_LIST_SQL = `
     )
 `;
 
+async function attachImages(env, rows, mapper) {
+  const products = (rows || []).map(mapper);
+  if (!products.length) return products;
+
+  const { results } = await env.DB.prepare(`
+    SELECT id, product_id, object_key, alt_text, sort_order
+    FROM product_images
+    ORDER BY product_id ASC, sort_order ASC, id ASC
+  `).all();
+
+  const grouped = new Map();
+  for (const row of results || []) {
+    if (!grouped.has(row.product_id)) grouped.set(row.product_id, []);
+    grouped.get(row.product_id).push(imageDto(row));
+  }
+
+  for (const product of products) {
+    product.images = grouped.get(product.id) || [];
+    if (product.images.length) product.imageUrl = product.images[0].url;
+  }
+  return products;
+}
+
+async function listProductImages(env, productId) {
+  const { results } = await env.DB.prepare(`
+    SELECT id, product_id, object_key, alt_text, sort_order
+    FROM product_images
+    WHERE product_id = ?
+    ORDER BY sort_order ASC, id ASC
+  `).bind(productId).all();
+  return (results || []).map(imageDto);
+}
+
 async function upsertSource(env, productId, source) {
   if (!source) return;
 
@@ -253,22 +312,147 @@ async function upsertSource(env, productId, source) {
   ).run();
 }
 
+function validateImageFile(file) {
+  if (!file || typeof file.size !== "number" || typeof file.type !== "string") {
+    throw new Error("Archivo de imagen no válido.");
+  }
+  if (!ALLOWED_IMAGE_TYPES.has(file.type)) {
+    throw new Error("Formato no admitido. Usa JPG, PNG, WebP o AVIF.");
+  }
+  if (file.size <= 0) throw new Error("La imagen está vacía.");
+  if (file.size > MAX_IMAGE_BYTES) throw new Error("Cada imagen puede ocupar como máximo 8 MB.");
+}
+
+async function uploadProductImages(request, env, productId) {
+  if (!env.PRODUCT_IMAGES) {
+    return json({ ok: false, error: "R2_NOT_CONFIGURED", message: "Falta el binding R2 PRODUCT_IMAGES." }, { status: 503 });
+  }
+
+  const product = await env.DB.prepare("SELECT id, name FROM products WHERE id = ?").bind(productId).first();
+  if (!product) return json({ ok: false, error: "NOT_FOUND", message: "Producto no encontrado." }, { status: 404 });
+
+  const form = await request.formData();
+  const files = form.getAll("files");
+  if (!files.length) return json({ ok: false, error: "NO_FILES", message: "Selecciona al menos una imagen." }, { status: 400 });
+
+  for (const file of files) validateImageFile(file);
+
+  const countRow = await env.DB.prepare("SELECT COUNT(*) AS total FROM product_images WHERE product_id = ?")
+    .bind(productId).first();
+  const currentCount = Number(countRow?.total || 0);
+  if (currentCount + files.length > MAX_IMAGES_PER_PRODUCT) {
+    return json({ ok: false, error: "TOO_MANY_IMAGES", message: `Máximo ${MAX_IMAGES_PER_PRODUCT} imágenes por producto.` }, { status: 400 });
+  }
+
+  const maxRow = await env.DB.prepare("SELECT COALESCE(MAX(sort_order), -10) AS max_sort FROM product_images WHERE product_id = ?")
+    .bind(productId).first();
+  let nextSort = Number(maxRow?.max_sort ?? -10) + 10;
+
+  for (const file of files) {
+    const ext = IMAGE_EXTENSIONS[file.type] || "img";
+    const safeProduct = slugify(productId) || "product";
+    const key = `products/${safeProduct}/${Date.now()}-${crypto.randomUUID()}.${ext}`;
+
+    await env.PRODUCT_IMAGES.put(key, file, {
+      httpMetadata: {
+        contentType: file.type,
+        cacheControl: "public, max-age=31536000, immutable"
+      },
+      customMetadata: {
+        productId: String(productId)
+      }
+    });
+
+    try {
+      await env.DB.prepare(`
+        INSERT INTO product_images (product_id, object_key, alt_text, sort_order)
+        VALUES (?, ?, ?, ?)
+      `).bind(productId, key, product.name || "", nextSort).run();
+      nextSort += 10;
+    } catch (error) {
+      await env.PRODUCT_IMAGES.delete(key).catch(() => {});
+      throw error;
+    }
+  }
+
+  return json({ ok: true, images: await listProductImages(env, productId) }, { status: 201, headers: { "Cache-Control": "no-store" } });
+}
+
+async function reorderProductImages(request, env, productId) {
+  const body = await readJson(request);
+  const ids = Array.isArray(body.ids) ? body.ids.map(x => Number(x)).filter(Number.isInteger) : [];
+
+  const { results } = await env.DB.prepare("SELECT id FROM product_images WHERE product_id = ? ORDER BY sort_order, id")
+    .bind(productId).all();
+  const currentIds = (results || []).map(r => Number(r.id));
+
+  if (ids.length !== currentIds.length || new Set(ids).size !== ids.length || currentIds.some(id => !ids.includes(id))) {
+    return json({ ok: false, error: "INVALID_ORDER", message: "El orden de imágenes no es válido." }, { status: 400 });
+  }
+
+  if (ids.length) {
+    const statements = ids.map((id, index) => env.DB.prepare(
+      "UPDATE product_images SET sort_order = ? WHERE id = ? AND product_id = ?"
+    ).bind(index * 10, id, productId));
+    await env.DB.batch(statements);
+  }
+
+  return json({ ok: true, images: await listProductImages(env, productId) }, { headers: { "Cache-Control": "no-store" } });
+}
+
+async function deleteProductImage(env, productId, imageId) {
+  const row = await env.DB.prepare(
+    "SELECT id, object_key FROM product_images WHERE id = ? AND product_id = ?"
+  ).bind(imageId, productId).first();
+  if (!row) return json({ ok: false, error: "NOT_FOUND", message: "Imagen no encontrada." }, { status: 404 });
+
+  await env.DB.prepare("DELETE FROM product_images WHERE id = ? AND product_id = ?")
+    .bind(imageId, productId).run();
+
+  if (env.PRODUCT_IMAGES) {
+    await env.PRODUCT_IMAGES.delete(row.object_key).catch(error => console.error("R2 delete orphan:", error));
+  }
+
+  const images = await listProductImages(env, productId);
+  if (images.length) {
+    const statements = images.map((img, index) => env.DB.prepare(
+      "UPDATE product_images SET sort_order = ? WHERE id = ? AND product_id = ?"
+    ).bind(index * 10, img.id, productId));
+    await env.DB.batch(statements);
+  }
+
+  return json({ ok: true, images: await listProductImages(env, productId) }, { headers: { "Cache-Control": "no-store" } });
+}
+
 async function handleAdminApi(request, env, url) {
   const denied = await requireAdmin(request, env);
   if (denied) return denied;
 
-  const base = "/api/admin/products";
-  const suffix = url.pathname.slice(base.length).replace(/^\//, "");
-  const id = suffix ? decodeURIComponent(suffix) : "";
-
   if (url.pathname === "/api/admin/session" && request.method === "GET") {
-    return json({ ok: true }, { headers: { "Cache-Control": "no-store" } });
+    return json({ ok: true, r2: Boolean(env.PRODUCT_IMAGES) }, { headers: { "Cache-Control": "no-store" } });
   }
+
+  const imageOrderMatch = url.pathname.match(/^\/api\/admin\/products\/([^/]+)\/images\/order$/);
+  if (imageOrderMatch && request.method === "PUT") {
+    return reorderProductImages(request, env, decodeURIComponent(imageOrderMatch[1]));
+  }
+
+  const imageDeleteMatch = url.pathname.match(/^\/api\/admin\/products\/([^/]+)\/images\/(\d+)$/);
+  if (imageDeleteMatch && request.method === "DELETE") {
+    return deleteProductImage(env, decodeURIComponent(imageDeleteMatch[1]), Number(imageDeleteMatch[2]));
+  }
+
+  const imageUploadMatch = url.pathname.match(/^\/api\/admin\/products\/([^/]+)\/images$/);
+  if (imageUploadMatch && request.method === "POST") {
+    return uploadProductImages(request, env, decodeURIComponent(imageUploadMatch[1]));
+  }
+
+  const base = "/api/admin/products";
 
   if (url.pathname === base && request.method === "GET") {
     const { results } = await env.DB.prepare(`${ADMIN_LIST_SQL} ORDER BY p.sort_order ASC, p.name ASC`).all();
     return json(
-      { ok: true, products: (results || []).map(mapAdminProduct) },
+      { ok: true, products: await attachImages(env, results || [], mapAdminProduct) },
       { headers: { "Cache-Control": "no-store" } }
     );
   }
@@ -279,8 +463,7 @@ async function handleAdminApi(request, env, url) {
     const source = sourcePayload(body);
 
     const existing = await env.DB.prepare("SELECT id FROM products WHERE id = ? OR slug = ? LIMIT 1")
-      .bind(p.id, p.slug)
-      .first();
+      .bind(p.id, p.slug).first();
     if (existing) return json({ ok: false, error: "DUPLICATE", message: "Ya existe un producto con ese ID o slug." }, { status: 409 });
 
     await env.DB.prepare(`
@@ -298,17 +481,20 @@ async function handleAdminApi(request, env, url) {
     return json({ ok: true, id: p.id }, { status: 201, headers: { "Cache-Control": "no-store" } });
   }
 
+  const productMatch = url.pathname.match(/^\/api\/admin\/products\/([^/]+)$/);
+  const id = productMatch ? decodeURIComponent(productMatch[1]) : "";
+
   if (id && request.method === "PUT") {
-    const current = await env.DB.prepare("SELECT id FROM products WHERE id = ?").bind(id).first();
+    const current = await env.DB.prepare("SELECT id, image_url FROM products WHERE id = ?").bind(id).first();
     if (!current) return json({ ok: false, error: "NOT_FOUND", message: "Producto no encontrado." }, { status: 404 });
 
     const body = await readJson(request);
+    if (body.imageUrl == null) body.imageUrl = current.image_url || "";
     const p = productPayload({ ...body, id }, id);
     const source = sourcePayload(body);
 
     const duplicate = await env.DB.prepare("SELECT id FROM products WHERE slug = ? AND id <> ? LIMIT 1")
-      .bind(p.slug, id)
-      .first();
+      .bind(p.slug, id).first();
     if (duplicate) return json({ ok: false, error: "DUPLICATE_SLUG", message: "Ese slug ya está siendo usado por otro producto." }, { status: 409 });
 
     await env.DB.prepare(`
@@ -329,9 +515,15 @@ async function handleAdminApi(request, env, url) {
   }
 
   if (id && request.method === "DELETE") {
+    const { results: imageRows } = await env.DB.prepare("SELECT object_key FROM product_images WHERE product_id = ?").bind(id).all();
     const result = await env.DB.prepare("DELETE FROM products WHERE id = ?").bind(id).run();
     const changed = Number(result?.meta?.changes || 0);
     if (!changed) return json({ ok: false, error: "NOT_FOUND", message: "Producto no encontrado." }, { status: 404 });
+
+    const keys = (imageRows || []).map(x => x.object_key).filter(Boolean);
+    if (keys.length && env.PRODUCT_IMAGES) {
+      await env.PRODUCT_IMAGES.delete(keys).catch(error => console.error("R2 delete product images:", error));
+    }
     return json({ ok: true, id }, { headers: { "Cache-Control": "no-store" } });
   }
 
@@ -344,7 +536,7 @@ async function handlePublicApi(request, env, url) {
     try {
       const row = await env.DB.prepare("SELECT COUNT(*) AS total FROM products").first();
       return json(
-        { ok: true, database: "connected", products: Number(row?.total || 0) },
+        { ok: true, database: "connected", products: Number(row?.total || 0), r2: Boolean(env.PRODUCT_IMAGES) },
         { headers: { "Cache-Control": "no-store" } }
       );
     } catch (error) {
@@ -368,7 +560,7 @@ async function handlePublicApi(request, env, url) {
         ORDER BY sort_order ASC, name ASC
       `).all();
       return json(
-        { ok: true, products: (results || []).map(mapPublicProduct) },
+        { ok: true, products: await attachImages(env, results || [], mapPublicProduct) },
         { headers: { "Cache-Control": "public, max-age=60" } }
       );
     } catch (error) {
@@ -383,11 +575,49 @@ async function handlePublicApi(request, env, url) {
   return json({ ok: false, error: "NOT_FOUND" }, { status: 404 });
 }
 
+async function handleMedia(request, env, url) {
+  if (!env.PRODUCT_IMAGES) return new Response("R2 not configured", { status: 503 });
+  if (!["GET", "HEAD"].includes(request.method)) {
+    return new Response("Method Not Allowed", { status: 405, headers: { Allow: "GET, HEAD" } });
+  }
+
+  const encoded = url.pathname.slice("/media/".length);
+  if (!encoded) return new Response("Not Found", { status: 404 });
+
+  let key;
+  try {
+    key = encoded.split("/").map(part => decodeURIComponent(part)).join("/");
+  } catch (_) {
+    return new Response("Bad Request", { status: 400 });
+  }
+
+  const object = request.method === "HEAD"
+    ? await env.PRODUCT_IMAGES.head(key)
+    : await env.PRODUCT_IMAGES.get(key);
+  if (!object) return new Response("Not Found", { status: 404 });
+
+  if (request.headers.get("If-None-Match") === object.httpEtag) {
+    return new Response(null, { status: 304, headers: { ETag: object.httpEtag } });
+  }
+
+  const headers = new Headers();
+  object.writeHttpMetadata(headers);
+  headers.set("ETag", object.httpEtag);
+  headers.set("X-Content-Type-Options", "nosniff");
+  if (!headers.has("Cache-Control")) headers.set("Cache-Control", "public, max-age=31536000, immutable");
+
+  return new Response(request.method === "HEAD" ? null : object.body, { headers });
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
     try {
+      if (url.pathname.startsWith("/media/")) {
+        return await handleMedia(request, env, url);
+      }
+
       if (url.pathname === "/api/admin/session" || url.pathname.startsWith("/api/admin/products")) {
         return await handleAdminApi(request, env, url);
       }
