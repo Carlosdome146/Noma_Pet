@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Administración — NÓMA PET</title>
   <link rel="stylesheet" href="../assets/styles.css">
-  <link rel="stylesheet" href="../assets/admin-extra.css">
   <meta name="robots" content="noindex,nofollow,noarchive">
 </head>
 <body class="admin">
@@ -124,24 +123,9 @@
           <div class="field"><label>Unidades</label><input id="stockQty" type="number" min="0" step="1" disabled></div>
           <div class="field full"><label>Descripción corta</label><textarea id="shortDesc" rows="2" maxlength="360"></textarea></div>
           <div class="field full"><label>Descripción completa</label><textarea id="description" rows="5"></textarea></div>
+          <div class="field full"><label>URL de imagen</label><input id="imageUrl" type="url" placeholder="Más adelante la sustituiremos por subida directa a R2"></div>
           <label class="admin-check full"><input id="published" type="checkbox"> <span>Publicado en la tienda</span></label>
         </div>
-
-        <h3 class="admin-section-title">Imágenes <span>(Cloudflare R2 · máximo 8)</span></h3>
-        <input id="legacyImageUrl" type="hidden">
-        <div class="r2-dropzone" id="imageDropzone" tabindex="0" role="button" aria-label="Subir imágenes">
-          <input id="imageFiles" type="file" accept="image/jpeg,image/png,image/webp,image/avif" multiple hidden>
-          <div class="r2-drop-icon">↥</div>
-          <div>
-            <b>Arrastra aquí las fotos</b>
-            <p>o pulsa para seleccionarlas · JPG, PNG, WebP o AVIF · hasta 8 MB por foto</p>
-          </div>
-          <button class="btn secondary" id="selectImagesBtn" type="button">Seleccionar fotos</button>
-        </div>
-        <p class="meta r2-help" id="imageUploadHint">La primera imagen será la principal de la tienda. Puedes reordenarlas, marcar otra como principal o eliminarlas.</p>
-        <div class="r2-image-grid" id="imageList"></div>
-        <div id="imageError" class="form-error" hidden></div>
-
 
         <h3 class="admin-section-title">Proveedor <span>(interno, no visible al cliente)</span></h3>
         <div class="formgrid">
