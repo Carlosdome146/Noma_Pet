@@ -69,7 +69,12 @@ async function login(candidate) {
   try {
     const res = await fetch("/api/admin/session", { headers: { Authorization: `Bearer ${token}` } });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.message || "Token incorrecto.");
+    if (!res.ok) {
+      if (data.error === "ADMIN_NOT_CONFIGURED") {
+        throw new Error("ADMIN_TOKEN no está disponible en ESTE Worker. Añádelo en Settings → Variables & Secrets del Worker que estás abriendo (no en Build Variables), pulsa Deploy y vuelve a probar.");
+      }
+      throw new Error(data.message || "Token incorrecto.");
+    }
     sessionStorage.setItem(TOKEN_KEY, token);
     showDashboard();
     await loadProducts();
