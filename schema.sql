@@ -46,6 +46,35 @@ CREATE TABLE IF NOT EXISTS product_sources (
 
 CREATE INDEX IF NOT EXISTS idx_sources_product ON product_sources (product_id);
 
+-- Variantes por producto: longitud, color, talla, etc.
+-- Coste/SKU/logística pueden variar por variante.
+CREATE TABLE IF NOT EXISTS product_variants (
+  id TEXT PRIMARY KEY,
+  product_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  price_cents INTEGER NOT NULL CHECK (price_cents >= 0),
+  supplier_sku TEXT,
+  product_cost_cents INTEGER,
+  shipping_cost_cents INTEGER,
+  cost_currency TEXT NOT NULL DEFAULT 'EUR',
+  weight_grams INTEGER,
+  warehouse TEXT,
+  stock_status TEXT NOT NULL DEFAULT 'unknown',
+  supplier_stock_qty INTEGER,
+  shipping_days_min INTEGER,
+  shipping_days_max INTEGER,
+  homologation_status TEXT NOT NULL DEFAULT 'pending',
+  published INTEGER NOT NULL DEFAULT 1 CHECK (published IN (0,1)),
+  is_default INTEGER NOT NULL DEFAULT 0 CHECK (is_default IN (0,1)),
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_variants_product ON product_variants (product_id, published, sort_order);
+CREATE INDEX IF NOT EXISTS idx_variants_default ON product_variants (product_id, is_default);
+
 -- Imágenes: preparadas para R2.
 CREATE TABLE IF NOT EXISTS product_images (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -81,6 +110,8 @@ CREATE TABLE IF NOT EXISTS order_items (
   order_id TEXT NOT NULL,
   product_id TEXT,
   product_name TEXT NOT NULL,
+  variant_id TEXT,
+  variant_name TEXT,
   quantity INTEGER NOT NULL CHECK (quantity > 0),
   unit_price_cents INTEGER NOT NULL CHECK (unit_price_cents >= 0),
   supplier TEXT,

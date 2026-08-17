@@ -89,7 +89,7 @@ async function openOrder(id){
 
   const items=(o.items||[]).map(i=>`
     <div class="admin-order-item">
-      <div><b>${escO(i.productName)}</b><span>${i.quantity} × ${moneyO(i.unitPrice,o.currency)}</span></div>
+      <div><b>${escO(i.productName)}</b>${i.variantName?`<span class="order-variant">${escO(i.variantName)}</span>`:""}<span>${i.quantity} × ${moneyO(i.unitPrice,o.currency)}</span></div>
       <strong>${moneyO(i.unitPrice*i.quantity,o.currency)}</strong>
       <div class="meta">${i.supplier?`${escO(i.supplier)} · ${escO(i.supplierSku||"sin SKU")}`:"Proveedor no asignado"}</div>
     </div>`).join("");

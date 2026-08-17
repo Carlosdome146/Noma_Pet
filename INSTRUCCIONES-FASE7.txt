@@ -1,0 +1,50 @@
+NÓMA PET · FASE 7 · VARIANTES
+
+OBJETIVO
+Añadir variantes reales por producto sin romper D1, R2, Stripe TEST, pedidos ni seguimiento.
+
+NO HAY QUE EJECUTAR schema.sql EN LA D1 EXISTENTE.
+El Worker crea automáticamente la tabla product_variants y añade a order_items las columnas variant_id y variant_name si todavía no existen.
+
+SUBIDA
+1. Sustituye el repositorio de GitHub por el contenido completo de este ZIP.
+2. Mantén Cloudflare exactamente como está:
+   - Deploy command: npx wrangler deploy
+   - D1 binding DB -> nomapet-db
+   - R2 binding PRODUCT_IMAGES -> nomapet-images
+   - Secrets ADMIN_TOKEN, STRIPE_SECRET_KEY y STRIPE_WEBHOOK_SECRET
+3. Espera al deploy.
+4. Comprueba /api/health. Ahora debe aparecer también "variants".
+5. Entra en /admin/, edita un producto y verás la sección Variantes.
+
+CADA VARIANTE PUEDE TENER
+- Nombre (ej. 10 ft / 16 ft)
+- PVP
+- SKU proveedor
+- Coste producto
+- Coste envío
+- Peso en gramos
+- Almacén
+- Estado de stock
+- Unidades del proveedor
+- Plazo mín./máx.
+- Estado de homologación
+- Visible/no visible
+- Variante predeterminada
+
+TIENDA
+- Los productos con varias variantes muestran “Desde X €”.
+- La ficha obliga a seleccionar/usar una variante válida.
+- El carrito guarda producto + variante.
+- Stripe cobra el precio de la variante desde D1, nunca el precio enviado por el navegador.
+- El pedido guarda variant_id, variant_name y el SKU específico de la variante.
+
+PRUEBA RECOMENDADA ANTES DE HOMOLOGAR NÓMA WALK
+1. Crea un producto de prueba borrador.
+2. Añade dos variantes: 10 ft y 16 ft.
+3. Publica ambas variantes y marca una predeterminada.
+4. Publica el producto.
+5. Añade cada variante al carrito y haz un pago Stripe TEST.
+6. Comprueba /admin/pedidos.html: debe aparecer la variante comprada.
+
+Cuando eso funcione, ya podemos dar de alta y homologar NÓMA Walk 10 ft y 16 ft con los datos reales.

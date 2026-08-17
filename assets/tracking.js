@@ -29,7 +29,7 @@ function renderOrder(order) {
   const result = $t("trackingResult");
   const items = (order.items || []).map(item => `
     <div class="order-item-row">
-      <span>${escT(item.productName)} <small>× ${item.quantity}</small></span>
+      <span>${escT(item.productName)}${item.variantName?` · <b>${escT(item.variantName)}</b>`:""} <small>× ${item.quantity}</small></span>
       <b>${moneyT(item.unitPrice * item.quantity, order.currency)}</b>
     </div>`).join("");
 

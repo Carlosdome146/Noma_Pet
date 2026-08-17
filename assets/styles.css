@@ -2,3 +2,13 @@
 
 /* Fase D1/R2 */
 .photo img,.bigphoto img,.cartthumb img{width:100%;height:100%;object-fit:cover;display:block}
+
+/* FASE 7 · Variantes de producto */
+.price-prefix{font-size:.58em;font-weight:800;color:var(--muted);vertical-align:middle;margin-right:3px}
+.variant-selector{margin:20px 0 6px}
+.variant-label{display:block;font-size:13px;font-weight:900;margin-bottom:9px}
+.variant-options{display:flex;gap:10px;flex-wrap:wrap}
+.variant-option{min-width:112px;border:1px solid var(--line);background:#fff;border-radius:15px;padding:11px 13px;text-align:left;cursor:pointer;color:var(--ink)}
+.variant-option b,.variant-option span{display:block}.variant-option span{margin-top:2px;color:var(--muted);font-size:13px}.variant-option small{display:block;color:#9c3426;margin-top:3px;font-weight:800}.variant-option:hover{border-color:#9cb6aa}.variant-option.active{border-color:var(--green);box-shadow:0 0 0 2px rgba(33,76,59,.12);background:#f0f5f2}.variant-option:disabled{opacity:.52;cursor:not-allowed}
+.detail-logistics{display:inline-flex;margin:10px 0 2px;padding:7px 10px;border-radius:999px;background:#e8f2ed;color:#24503f;font-size:12px;font-weight:800}
+.cart-variant{display:inline-block;margin:4px 0 2px;padding:4px 8px;border-radius:999px;background:#edf2ef;color:#24503f;font-size:12px;font-weight:800}

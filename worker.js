@@ -98,6 +98,66 @@ function sourcePayload(body) {
   };
 }
 
+function variantPayloads(body, productId) {
+  const raw = Array.isArray(body.variants) ? body.variants : [];
+  const variants = [];
+  const seenIds = new Set();
+
+  for (let index = 0; index < raw.length; index++) {
+    const v = raw[index] || {};
+    const name = cleanText(v.name, 120);
+    if (!name) continue;
+
+    let id = cleanText(v.id, 160);
+    if (!id) {
+      const base = slugify(name) || `variant-${index + 1}`;
+      id = `${productId}__${base}__${crypto.randomUUID().slice(0, 8)}`;
+    }
+    if (seenIds.has(id)) throw new Error("Hay dos variantes con el mismo ID.");
+    seenIds.add(id);
+
+    const stockStatus = ["unknown", "in_stock", "low", "out"].includes(v.stockStatus) ? v.stockStatus : "unknown";
+    const homologationStatus = ["pending", "review", "approved", "rejected"].includes(v.homologationStatus)
+      ? v.homologationStatus
+      : "pending";
+
+    variants.push({
+      id,
+      productId,
+      name,
+      priceCents: centsFromValue(v.price),
+      supplierSku: nullableText(v.supplierSku, 180),
+      productCostCents: v.productCost === "" || v.productCost == null ? null : centsFromValue(v.productCost),
+      shippingCostCents: v.shippingCost === "" || v.shippingCost == null ? null : centsFromValue(v.shippingCost),
+      costCurrency: cleanText(v.costCurrency, 3).toUpperCase() || "EUR",
+      weightGrams: v.weightGrams === "" || v.weightGrams == null ? null : Math.max(0, toInt(v.weightGrams, 0)),
+      warehouse: nullableText(v.warehouse, 160),
+      stockStatus,
+      supplierStockQty: v.supplierStockQty === "" || v.supplierStockQty == null ? null : Math.max(0, toInt(v.supplierStockQty, 0)),
+      shippingDaysMin: v.shippingDaysMin === "" || v.shippingDaysMin == null ? null : Math.max(0, toInt(v.shippingDaysMin, 0)),
+      shippingDaysMax: v.shippingDaysMax === "" || v.shippingDaysMax == null ? null : Math.max(0, toInt(v.shippingDaysMax, 0)),
+      homologationStatus,
+      published: v.published ? 1 : 0,
+      isDefault: v.isDefault ? 1 : 0,
+      sortOrder: toInt(v.sortOrder, index * 10)
+    });
+  }
+
+  if (variants.length) {
+    const defaults = variants.filter(v => v.isDefault);
+    if (defaults.length === 0) variants[0].isDefault = 1;
+    if (defaults.length > 1) {
+      let kept = false;
+      for (const v of variants) {
+        if (v.isDefault && !kept) kept = true;
+        else if (v.isDefault) v.isDefault = 0;
+      }
+    }
+  }
+
+  return variants;
+}
+
 async function readJson(request) {
   const type = request.headers.get("content-type") || "";
   if (!type.includes("application/json")) throw new Error("El cuerpo debe ser JSON.");
@@ -199,6 +259,37 @@ function mapAdminProduct(p) {
   };
 }
 
+function publicVariantDto(v) {
+  return {
+    id: v.id,
+    name: v.name,
+    price: Number(v.price_cents || 0) / 100,
+    currency: v.cost_currency ? "EUR" : "EUR",
+    stockStatus: v.stock_status || "unknown",
+    supplierStockQty: v.supplier_stock_qty == null ? null : Number(v.supplier_stock_qty),
+    warehouse: v.warehouse || "",
+    shippingDaysMin: v.shipping_days_min == null ? null : Number(v.shipping_days_min),
+    shippingDaysMax: v.shipping_days_max == null ? null : Number(v.shipping_days_max),
+    isDefault: Boolean(v.is_default),
+    sortOrder: Number(v.sort_order || 0)
+  };
+}
+
+function adminVariantDto(v) {
+  return {
+    ...publicVariantDto(v),
+    supplierSku: v.supplier_sku || "",
+    productCost: v.product_cost_cents == null ? "" : Number(v.product_cost_cents) / 100,
+    shippingCost: v.shipping_cost_cents == null ? "" : Number(v.shipping_cost_cents) / 100,
+    costCurrency: v.cost_currency || "EUR",
+    weightGrams: v.weight_grams == null ? "" : Number(v.weight_grams),
+    homologationStatus: v.homologation_status || "pending",
+    published: Boolean(v.published),
+    createdAt: v.created_at,
+    updatedAt: v.updated_at
+  };
+}
+
 const ADMIN_LIST_SQL = `
   SELECT
     p.*,
@@ -246,6 +337,91 @@ async function attachImages(env, rows, mapper) {
     if (product.images.length) product.imageUrl = product.images[0].url;
   }
   return products;
+}
+
+async function attachVariants(env, products, admin = false) {
+  if (!products.length) return products;
+  await ensureCatalogSchema(env);
+  const where = admin ? "" : "WHERE published = 1";
+  const { results } = await env.DB.prepare(`
+    SELECT *
+    FROM product_variants
+    ${where}
+    ORDER BY product_id ASC, sort_order ASC, name ASC
+  `).all();
+
+  const grouped = new Map();
+  for (const row of results || []) {
+    if (!grouped.has(row.product_id)) grouped.set(row.product_id, []);
+    grouped.get(row.product_id).push(admin ? adminVariantDto(row) : publicVariantDto(row));
+  }
+
+  for (const product of products) {
+    product.variants = grouped.get(product.id) || [];
+    product.hasVariants = product.variants.length > 0;
+    if (product.hasVariants) {
+      const prices = product.variants.map(v => Number(v.price || 0)).filter(Number.isFinite);
+      if (prices.length) {
+        product.priceFrom = Math.min(...prices);
+        if (!admin) product.price = product.priceFrom;
+      }
+      product.defaultVariantId = product.variants.find(v => v.isDefault)?.id || product.variants[0]?.id || null;
+    } else {
+      product.priceFrom = product.price;
+      product.defaultVariantId = null;
+    }
+  }
+  return products;
+}
+
+async function saveVariants(env, productId, variants) {
+  await ensureCatalogSchema(env);
+  const current = await env.DB.prepare("SELECT id FROM product_variants WHERE product_id = ?")
+    .bind(productId).all();
+  const currentIds = new Set((current.results || []).map(x => String(x.id)));
+  const keepIds = new Set(variants.map(v => String(v.id)));
+  const statements = [];
+
+  for (const id of currentIds) {
+    if (!keepIds.has(id)) {
+      statements.push(env.DB.prepare("DELETE FROM product_variants WHERE id = ? AND product_id = ?").bind(id, productId));
+    }
+  }
+
+  for (const v of variants) {
+    statements.push(env.DB.prepare(`
+      INSERT INTO product_variants (
+        id, product_id, name, price_cents, supplier_sku, product_cost_cents, shipping_cost_cents,
+        cost_currency, weight_grams, warehouse, stock_status, supplier_stock_qty,
+        shipping_days_min, shipping_days_max, homologation_status, published, is_default, sort_order,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      ON CONFLICT(id) DO UPDATE SET
+        name = excluded.name,
+        price_cents = excluded.price_cents,
+        supplier_sku = excluded.supplier_sku,
+        product_cost_cents = excluded.product_cost_cents,
+        shipping_cost_cents = excluded.shipping_cost_cents,
+        cost_currency = excluded.cost_currency,
+        weight_grams = excluded.weight_grams,
+        warehouse = excluded.warehouse,
+        stock_status = excluded.stock_status,
+        supplier_stock_qty = excluded.supplier_stock_qty,
+        shipping_days_min = excluded.shipping_days_min,
+        shipping_days_max = excluded.shipping_days_max,
+        homologation_status = excluded.homologation_status,
+        published = excluded.published,
+        is_default = excluded.is_default,
+        sort_order = excluded.sort_order,
+        updated_at = CURRENT_TIMESTAMP
+    `).bind(
+      v.id, productId, v.name, v.priceCents, v.supplierSku, v.productCostCents, v.shippingCostCents,
+      v.costCurrency, v.weightGrams, v.warehouse, v.stockStatus, v.supplierStockQty,
+      v.shippingDaysMin, v.shippingDaysMax, v.homologationStatus, v.published, v.isDefault, v.sortOrder
+    ));
+  }
+
+  if (statements.length) await env.DB.batch(statements);
 }
 
 async function listProductImages(env, productId) {
@@ -484,7 +660,46 @@ function stripeTestConfigured(env) {
   );
 }
 
+let catalogSchemaReady = false;
+let orderSchemaReady = false;
+
+async function ensureCatalogSchema(env) {
+  if (catalogSchemaReady) return;
+  await env.DB.batch([
+    env.DB.prepare(`
+      CREATE TABLE IF NOT EXISTS product_variants (
+        id TEXT PRIMARY KEY,
+        product_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        price_cents INTEGER NOT NULL CHECK (price_cents >= 0),
+        supplier_sku TEXT,
+        product_cost_cents INTEGER,
+        shipping_cost_cents INTEGER,
+        cost_currency TEXT NOT NULL DEFAULT 'EUR',
+        weight_grams INTEGER,
+        warehouse TEXT,
+        stock_status TEXT NOT NULL DEFAULT 'unknown',
+        supplier_stock_qty INTEGER,
+        shipping_days_min INTEGER,
+        shipping_days_max INTEGER,
+        homologation_status TEXT NOT NULL DEFAULT 'pending',
+        published INTEGER NOT NULL DEFAULT 1 CHECK (published IN (0,1)),
+        is_default INTEGER NOT NULL DEFAULT 0 CHECK (is_default IN (0,1)),
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+      )
+    `),
+    env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_variants_product ON product_variants (product_id, published, sort_order)`),
+    env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_variants_default ON product_variants (product_id, is_default)`)
+  ]);
+  catalogSchemaReady = true;
+}
+
 async function ensureOrderSchema(env) {
+  if (orderSchemaReady) return;
+  await ensureCatalogSchema(env);
   await env.DB.batch([
     env.DB.prepare(`
       CREATE TABLE IF NOT EXISTS order_addresses (
@@ -521,6 +736,16 @@ async function ensureOrderSchema(env) {
     env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_orders_email_code ON orders (customer_email, public_code)`),
     env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_orders_stripe_session ON orders (stripe_checkout_session_id)`)
   ]);
+
+  const columns = await env.DB.prepare("PRAGMA table_info(order_items)").all();
+  const names = new Set((columns.results || []).map(x => String(x.name)));
+  if (!names.has("variant_id")) {
+    await env.DB.prepare("ALTER TABLE order_items ADD COLUMN variant_id TEXT").run();
+  }
+  if (!names.has("variant_name")) {
+    await env.DB.prepare("ALTER TABLE order_items ADD COLUMN variant_name TEXT").run();
+  }
+  orderSchemaReady = true;
 }
 
 function cleanCustomer(body = {}) {
@@ -550,14 +775,16 @@ function cleanCustomer(body = {}) {
 }
 
 async function resolveOrderItems(env, rawItems) {
+  await ensureCatalogSchema(env);
   const normalized = [];
   for (const raw of Array.isArray(rawItems) ? rawItems : []) {
     const id = cleanText(raw?.id, 120);
+    const variantId = nullableText(raw?.variantId, 180);
     const quantity = safeQuantity(raw?.qty);
     if (!id || quantity < 1) continue;
-    const hit = normalized.find(x => x.id === id);
+    const hit = normalized.find(x => x.id === id && (x.variantId || "") === (variantId || ""));
     if (hit) hit.quantity = Math.min(20, hit.quantity + quantity);
-    else normalized.push({ id, quantity });
+    else normalized.push({ id, variantId, quantity });
   }
 
   if (!normalized.length) throw new Error("El carrito está vacío.");
@@ -567,7 +794,11 @@ async function resolveOrderItems(env, rawItems) {
     SELECT
       p.id, p.name, p.price_cents, p.currency, p.published,
       p.stock_mode, p.stock_qty,
-      s.supplier, s.supplier_sku
+      s.supplier, s.supplier_sku AS base_supplier_sku,
+      v.id AS variant_id, v.name AS variant_name, v.price_cents AS variant_price_cents,
+      v.supplier_sku AS variant_supplier_sku, v.published AS variant_published,
+      v.stock_status AS variant_stock_status, v.supplier_stock_qty,
+      (SELECT COUNT(*) FROM product_variants vc WHERE vc.product_id = p.id AND vc.published = 1) AS published_variant_count
     FROM products p
     LEFT JOIN product_sources s
       ON s.id = (
@@ -575,9 +806,13 @@ async function resolveOrderItems(env, rawItems) {
         FROM product_sources s2
         WHERE s2.product_id = p.id
       )
+    LEFT JOIN product_variants v
+      ON v.product_id = p.id
+     AND v.published = 1
+     AND (v.id = ? OR (? IS NULL AND v.is_default = 1))
     WHERE p.id = ?
     LIMIT 1
-  `).bind(item.id));
+  `).bind(item.variantId, item.variantId, item.id));
 
   const results = await env.DB.batch(statements);
   const resolved = [];
@@ -588,17 +823,31 @@ async function resolveOrderItems(env, rawItems) {
     if (!row || Number(row.published) !== 1) {
       throw new Error("Uno de los productos ya no está disponible.");
     }
-    if (row.stock_mode === "finite" && Number(row.stock_qty || 0) < item.quantity) {
+
+    const hasVariants = Number(row.published_variant_count || 0) > 0;
+    if (hasVariants && !row.variant_id) {
+      throw new Error(`Selecciona una variante disponible de “${row.name}”.`);
+    }
+    if (row.variant_stock_status === "out") {
+      throw new Error(`La variante “${row.variant_name}” de “${row.name}” está agotada.`);
+    }
+    if (row.supplier_stock_qty != null && Number(row.supplier_stock_qty) < item.quantity) {
+      throw new Error(`No hay suficientes unidades de “${row.name} · ${row.variant_name}”.`);
+    }
+    if (!hasVariants && row.stock_mode === "finite" && Number(row.stock_qty || 0) < item.quantity) {
       throw new Error(`No hay suficientes unidades de “${row.name}”.`);
     }
+
     resolved.push({
       productId: row.id,
       productName: row.name,
+      variantId: row.variant_id || null,
+      variantName: row.variant_name || null,
       quantity: item.quantity,
-      unitPriceCents: Number(row.price_cents || 0),
+      unitPriceCents: hasVariants ? Number(row.variant_price_cents || 0) : Number(row.price_cents || 0),
       currency: row.currency || "EUR",
       supplier: row.supplier || null,
-      supplierSku: row.supplier_sku || null
+      supplierSku: row.variant_supplier_sku || row.base_supplier_sku || null
     });
   }
 
@@ -637,11 +886,11 @@ function orderInsertStatements(env, { orderId, publicCode, customer, cart, payme
     ),
     ...cart.items.map(item => env.DB.prepare(`
       INSERT INTO order_items (
-        order_id, product_id, product_name, quantity, unit_price_cents,
+        order_id, product_id, product_name, variant_id, variant_name, quantity, unit_price_cents,
         supplier, supplier_sku
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(
-      orderId, item.productId, item.productName, item.quantity,
+      orderId, item.productId, item.productName, item.variantId, item.variantName, item.quantity,
       item.unitPriceCents, item.supplier, item.supplierSku
     )),
     env.DB.prepare(`
@@ -728,7 +977,7 @@ async function createStripeSession(env, origin, customer, cart, orderId, publicC
   cart.items.forEach((item, index) => {
     params.push(
       [`line_items[${index}][price_data][currency]`, cart.currency.toLowerCase()],
-      [`line_items[${index}][price_data][product_data][name]`, item.productName],
+      [`line_items[${index}][price_data][product_data][name]`, item.variantName ? `${item.productName} — ${item.variantName}` : item.productName],
       [`line_items[${index}][price_data][unit_amount]`, item.unitPriceCents],
       [`line_items[${index}][quantity]`, item.quantity]
     );
@@ -1052,7 +1301,7 @@ async function getAdminOrder(env, orderId) {
 
   const [itemsResult, eventsResult] = await env.DB.batch([
     env.DB.prepare(`
-      SELECT id, product_id, product_name, quantity, unit_price_cents,
+      SELECT id, product_id, product_name, variant_id, variant_name, quantity, unit_price_cents,
              supplier, supplier_sku
       FROM order_items
       WHERE order_id = ?
@@ -1097,6 +1346,8 @@ async function getAdminOrder(env, orderId) {
       id: Number(item.id),
       productId: item.product_id,
       productName: item.product_name,
+      variantId: item.variant_id || null,
+      variantName: item.variant_name || "",
       quantity: Number(item.quantity || 0),
       unitPrice: Number(item.unit_price_cents || 0) / 100,
       supplier: item.supplier || "",
@@ -1194,7 +1445,7 @@ async function publicOrderStatus(request, env) {
   }
 
   const { results } = await env.DB.prepare(`
-    SELECT product_name, quantity, unit_price_cents
+    SELECT product_name, variant_name, quantity, unit_price_cents
     FROM order_items
     WHERE order_id = ?
     ORDER BY id ASC
@@ -1217,6 +1468,7 @@ async function publicOrderStatus(request, env) {
       stripeTest: isStripeTestOrderId(order.id),
       items: (results || []).map(item => ({
         productName: item.product_name,
+        variantName: item.variant_name || "",
         quantity: Number(item.quantity || 0),
         unitPrice: Number(item.unit_price_cents || 0) / 100
       }))
@@ -1228,6 +1480,7 @@ async function publicOrderStatus(request, env) {
 async function handleAdminApi(request, env, url) {
   const denied = await requireAdmin(request, env);
   if (denied) return denied;
+  await ensureCatalogSchema(env);
 
   if (url.pathname === "/api/admin/session" && request.method === "GET") {
     return json({ ok: true, r2: Boolean(env.PRODUCT_IMAGES) }, { headers: { "Cache-Control": "no-store" } });
@@ -1278,7 +1531,7 @@ async function handleAdminApi(request, env, url) {
   if (url.pathname === base && request.method === "GET") {
     const { results } = await env.DB.prepare(`${ADMIN_LIST_SQL} ORDER BY p.sort_order ASC, p.name ASC`).all();
     return json(
-      { ok: true, products: await attachImages(env, results || [], mapAdminProduct) },
+      { ok: true, products: await attachVariants(env, await attachImages(env, results || [], mapAdminProduct), true) },
       { headers: { "Cache-Control": "no-store" } }
     );
   }
@@ -1287,6 +1540,7 @@ async function handleAdminApi(request, env, url) {
     const body = await readJson(request);
     const p = productPayload(body);
     const source = sourcePayload(body);
+    const variants = variantPayloads(body, p.id);
 
     const existing = await env.DB.prepare("SELECT id FROM products WHERE id = ? OR slug = ? LIMIT 1")
       .bind(p.id, p.slug).first();
@@ -1304,6 +1558,7 @@ async function handleAdminApi(request, env, url) {
     ).run();
 
     await upsertSource(env, p.id, source);
+    await saveVariants(env, p.id, variants);
     return json({ ok: true, id: p.id }, { status: 201, headers: { "Cache-Control": "no-store" } });
   }
 
@@ -1318,6 +1573,7 @@ async function handleAdminApi(request, env, url) {
     if (body.imageUrl == null) body.imageUrl = current.image_url || "";
     const p = productPayload({ ...body, id }, id);
     const source = sourcePayload(body);
+    const variants = variantPayloads(body, id);
 
     const duplicate = await env.DB.prepare("SELECT id FROM products WHERE slug = ? AND id <> ? LIMIT 1")
       .bind(p.slug, id).first();
@@ -1337,6 +1593,7 @@ async function handleAdminApi(request, env, url) {
     ).run();
 
     await upsertSource(env, id, source);
+    await saveVariants(env, id, variants);
     return json({ ok: true, id }, { headers: { "Cache-Control": "no-store" } });
   }
 
@@ -1357,12 +1614,16 @@ async function handleAdminApi(request, env, url) {
 }
 
 async function handlePublicApi(request, env, url) {
+  await ensureCatalogSchema(env);
   if (url.pathname === "/api/health") {
     if (request.method !== "GET") return new Response("Method Not Allowed", { status: 405, headers: { Allow: "GET" } });
     try {
-      const row = await env.DB.prepare("SELECT COUNT(*) AS total FROM products").first();
+      const [productRow, variantRow] = await Promise.all([
+        env.DB.prepare("SELECT COUNT(*) AS total FROM products").first(),
+        env.DB.prepare("SELECT COUNT(*) AS total FROM product_variants").first()
+      ]);
       return json(
-        { ok: true, database: "connected", products: Number(row?.total || 0), r2: Boolean(env.PRODUCT_IMAGES), orders: true, stripe: stripeTestConfigured(env), stripeMode: stripeTestConfigured(env) ? "test" : "disabled" },
+        { ok: true, database: "connected", products: Number(productRow?.total || 0), variants: Number(variantRow?.total || 0), r2: Boolean(env.PRODUCT_IMAGES), orders: true, stripe: stripeTestConfigured(env), stripeMode: stripeTestConfigured(env) ? "test" : "disabled" },
         { headers: { "Cache-Control": "no-store" } }
       );
     } catch (error) {
@@ -1386,7 +1647,7 @@ async function handlePublicApi(request, env, url) {
         ORDER BY sort_order ASC, name ASC
       `).all();
       return json(
-        { ok: true, products: await attachImages(env, results || [], mapPublicProduct) },
+        { ok: true, products: await attachVariants(env, await attachImages(env, results || [], mapPublicProduct), false) },
         { headers: { "Cache-Control": "public, max-age=60" } }
       );
     } catch (error) {

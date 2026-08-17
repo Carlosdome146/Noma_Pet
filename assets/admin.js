@@ -8,6 +8,7 @@ let token = sessionStorage.getItem(TOKEN_KEY) || "";
 let currentImages = [];
 let pendingFiles = [];
 let uploadingImages = false;
+let variants = [];
 
 const $ = id => document.getElementById(id);
 const money = n => new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR" }).format(Number(n || 0));
@@ -119,7 +120,8 @@ function render() {
   const query = $("searchInput").value.trim().toLowerCase();
   const status = $("statusFilter").value;
   const filtered = products.filter(p => {
-    const haystack = [p.name, p.cat, p.source?.supplier, p.source?.supplierSku].filter(Boolean).join(" ").toLowerCase();
+    const variantText = (p.variants || []).flatMap(v => [v.name, v.supplierSku]).filter(Boolean);
+    const haystack = [p.name, p.cat, p.source?.supplier, p.source?.supplierSku, ...variantText].filter(Boolean).join(" ").toLowerCase();
     const matchesText = !query || haystack.includes(query);
     const matchesStatus = status === "all" || (status === "published" ? p.published : !p.published);
     return matchesText && matchesStatus;
@@ -138,11 +140,11 @@ function render() {
             ${p.imageUrl
               ? `<img class="admin-product-thumb" src="${escapeHtml(p.imageUrl)}" alt="">`
               : `<span class="admin-product-emoji">${escapeHtml(p.emoji || "🐾")}</span>`}
-            <div><b>${escapeHtml(p.name)}</b><div class="meta">${escapeHtml(p.id)} · ${(p.images || []).length} foto${(p.images || []).length === 1 ? "" : "s"}</div></div>
+            <div><b>${escapeHtml(p.name)}</b><div class="meta">${escapeHtml(p.id)} · ${(p.images || []).length} foto${(p.images || []).length === 1 ? "" : "s"} · ${(p.variants || []).length} variante${(p.variants || []).length === 1 ? "" : "s"}</div></div>
           </div>
         </td>
         <td>${escapeHtml(p.cat || "")}</td>
-        <td><b>${money(p.price)}</b></td>
+        <td><b>${p.hasVariants ? `Desde ${money(p.priceFrom ?? p.price)}` : money(p.price)}</b></td>
         <td>${p.source?.supplier ? `${escapeHtml(p.source.supplier)}<div class="meta">${escapeHtml(p.source.supplierSku || "Sin SKU")}</div>` : '<span class="meta">Sin proveedor</span>'}</td>
         <td><span class="status ${p.published ? "" : "draft"}">${p.published ? "Publicado" : "Borrador"}</span></td>
         <td><button class="btn secondary admin-edit" data-edit="${escapeHtml(p.id)}">Editar</button></td>
@@ -167,6 +169,8 @@ function resetForm() {
   $("deleteBtn").hidden = true;
   currentImages = [];
   pendingFiles = [];
+  variants = [];
+  renderVariants();
   setFormError();
   setImageError();
   renderImageManager();
@@ -203,6 +207,8 @@ function openEdit(id) {
   $("published").checked = Boolean(p.published);
 
   currentImages = Array.isArray(p.images) ? p.images.map(x => ({ ...x })) : [];
+  variants = Array.isArray(p.variants) ? p.variants.map(v => ({ ...v })) : [];
+  renderVariants();
 
   const s = p.source || {};
   $("sourceId").value = s.id || "";
@@ -258,6 +264,25 @@ function payloadFromForm() {
     description: $("description").value,
     imageUrl: $("legacyImageUrl").value || null,
     published: $("published").checked,
+    variants: variants.map((v, index) => ({
+      id: v.id || null,
+      name: v.name || "",
+      price: v.price ?? "",
+      supplierSku: v.supplierSku || "",
+      productCost: v.productCost ?? "",
+      shippingCost: v.shippingCost ?? "",
+      costCurrency: v.costCurrency || "EUR",
+      weightGrams: v.weightGrams ?? "",
+      warehouse: v.warehouse || "",
+      stockStatus: v.stockStatus || "unknown",
+      supplierStockQty: v.supplierStockQty ?? "",
+      shippingDaysMin: v.shippingDaysMin ?? "",
+      shippingDaysMax: v.shippingDaysMax ?? "",
+      homologationStatus: v.homologationStatus || "pending",
+      published: Boolean(v.published),
+      isDefault: Boolean(v.isDefault),
+      sortOrder: v.sortOrder ?? index * 10
+    })),
     source: {
       id: $("sourceId").value || null,
       supplier: $("supplier").value,
@@ -274,6 +299,115 @@ function payloadFromForm() {
       notes: $("sourceNotes").value
     }
   };
+}
+
+function blankVariant() {
+  return {
+    id: "",
+    name: "",
+    price: "",
+    supplierSku: "",
+    productCost: "",
+    shippingCost: "",
+    costCurrency: "EUR",
+    weightGrams: "",
+    warehouse: "",
+    stockStatus: "unknown",
+    supplierStockQty: "",
+    shippingDaysMin: "",
+    shippingDaysMax: "",
+    homologationStatus: "pending",
+    published: true,
+    isDefault: variants.length === 0,
+    sortOrder: variants.length * 10
+  };
+}
+
+function variantStatusLabel(status) {
+  return ({ pending: "Pendiente", review: "En revisión", approved: "Homologada", rejected: "Rechazada" })[status] || "Pendiente";
+}
+
+function renderVariants() {
+  const list = $("variantList");
+  const empty = $("variantEmpty");
+  if (!list || !empty) return;
+  empty.hidden = variants.length > 0;
+  list.innerHTML = variants.map((v, index) => `
+    <article class="variant-card" data-variant-index="${index}">
+      <div class="variant-card-head">
+        <div class="variant-card-title">
+          <span class="variant-index">${index + 1}</span>
+          <div><b>${escapeHtml(v.name || `Variante ${index + 1}`)}</b><div class="meta">${v.id ? `ID: ${escapeHtml(v.id)}` : "Se generará el ID al guardar"}</div></div>
+          <span class="variant-homologation ${escapeHtml(v.homologationStatus || "pending")}">${variantStatusLabel(v.homologationStatus)}</span>
+        </div>
+        <button type="button" class="variant-remove" data-variant-remove="${index}">Eliminar</button>
+      </div>
+      <div class="variant-grid">
+        <div class="field span2"><label>Nombre / opción *</label><input data-vfield="name" value="${escapeHtml(v.name || "")}" placeholder="10 ft, 16 ft, Azul…" maxlength="120"></div>
+        <div class="field"><label>PVP (€) *</label><input data-vfield="price" type="number" min="0" step="0.01" value="${escapeHtml(v.price ?? "")}"></div>
+        <div class="field"><label>Orden</label><input data-vfield="sortOrder" type="number" step="1" value="${escapeHtml(v.sortOrder ?? index * 10)}"></div>
+
+        <div class="field span2"><label>SKU proveedor</label><input data-vfield="supplierSku" value="${escapeHtml(v.supplierSku || "")}" maxlength="180"></div>
+        <div class="field"><label>Coste producto</label><input data-vfield="productCost" type="number" min="0" step="0.01" value="${escapeHtml(v.productCost ?? "")}"></div>
+        <div class="field"><label>Coste envío</label><input data-vfield="shippingCost" type="number" min="0" step="0.01" value="${escapeHtml(v.shippingCost ?? "")}"></div>
+
+        <div class="field"><label>Peso (g)</label><input data-vfield="weightGrams" type="number" min="0" step="1" value="${escapeHtml(v.weightGrams ?? "")}"></div>
+        <div class="field"><label>Almacén</label><input data-vfield="warehouse" value="${escapeHtml(v.warehouse || "")}" placeholder="España"></div>
+        <div class="field"><label>Stock proveedor</label>
+          <select data-vfield="stockStatus">
+            <option value="unknown" ${v.stockStatus === "unknown" ? "selected" : ""}>Sin comprobar</option>
+            <option value="in_stock" ${v.stockStatus === "in_stock" ? "selected" : ""}>En stock</option>
+            <option value="low" ${v.stockStatus === "low" ? "selected" : ""}>Stock bajo</option>
+            <option value="out" ${v.stockStatus === "out" ? "selected" : ""}>Sin stock</option>
+          </select>
+        </div>
+        <div class="field"><label>Unidades proveedor</label><input data-vfield="supplierStockQty" type="number" min="0" step="1" value="${escapeHtml(v.supplierStockQty ?? "")}"></div>
+
+        <div class="field"><label>Envío mín. días</label><input data-vfield="shippingDaysMin" type="number" min="0" step="1" value="${escapeHtml(v.shippingDaysMin ?? "")}"></div>
+        <div class="field"><label>Envío máx. días</label><input data-vfield="shippingDaysMax" type="number" min="0" step="1" value="${escapeHtml(v.shippingDaysMax ?? "")}"></div>
+        <div class="field"><label>Homologación</label>
+          <select data-vfield="homologationStatus">
+            <option value="pending" ${v.homologationStatus === "pending" ? "selected" : ""}>Pendiente</option>
+            <option value="review" ${v.homologationStatus === "review" ? "selected" : ""}>En revisión</option>
+            <option value="approved" ${v.homologationStatus === "approved" ? "selected" : ""}>Homologada</option>
+            <option value="rejected" ${v.homologationStatus === "rejected" ? "selected" : ""}>Rechazada</option>
+          </select>
+        </div>
+        <div class="field"><label>Moneda coste</label>
+          <select data-vfield="costCurrency"><option value="EUR" ${v.costCurrency !== "USD" ? "selected" : ""}>EUR</option><option value="USD" ${v.costCurrency === "USD" ? "selected" : ""}>USD</option></select>
+        </div>
+
+        <div class="variant-flags">
+          <label class="variant-check"><input data-vfield="published" type="checkbox" ${v.published ? "checked" : ""}> Visible en tienda</label>
+          <label class="variant-check"><input data-vfield="isDefault" type="checkbox" ${v.isDefault ? "checked" : ""}> Variante predeterminada</label>
+        </div>
+      </div>
+    </article>
+  `).join("");
+}
+
+function setVariantField(index, field, element) {
+  const v = variants[index];
+  if (!v) return;
+  if (element.type === "checkbox") v[field] = element.checked;
+  else v[field] = element.value;
+
+  if (field === "isDefault" && element.checked) {
+    variants.forEach((other, i) => { other.isDefault = i === index; });
+    renderVariants();
+  } else if (field === "homologationStatus") {
+    renderVariants();
+  }
+}
+
+function validateVariantsBeforeSave() {
+  if (!variants.length) return;
+  for (let i = 0; i < variants.length; i++) {
+    const v = variants[i];
+    if (!String(v.name || "").trim()) throw new Error(`La variante ${i + 1} necesita un nombre.`);
+    if (v.price === "" || !Number.isFinite(Number(v.price)) || Number(v.price) < 0) throw new Error(`La variante “${v.name}” necesita un PVP válido.`);
+  }
+  if (!variants.some(v => v.isDefault)) variants[0].isDefault = true;
 }
 
 function validateFiles(files, includePending = true) {
@@ -432,6 +566,8 @@ async function saveProduct(event) {
   setFormError();
   setImageError();
   const editId = $("editId").value;
+  try { validateVariantsBeforeSave(); }
+  catch (error) { setFormError(error.message); return; }
   const payload = payloadFromForm();
   const btn = $("saveBtn");
   btn.disabled = true;
@@ -507,6 +643,32 @@ $("stockMode").addEventListener("change", () => {
 $("adminRows").addEventListener("click", e => {
   const btn = e.target.closest("[data-edit]");
   if (btn) openEdit(btn.dataset.edit);
+});
+
+$("addVariantBtn").addEventListener("click", () => {
+  variants.push(blankVariant());
+  renderVariants();
+});
+
+$("variantList").addEventListener("input", e => {
+  const card = e.target.closest("[data-variant-index]");
+  const field = e.target.dataset.vfield;
+  if (!card || !field) return;
+  setVariantField(Number(card.dataset.variantIndex), field, e.target);
+});
+$("variantList").addEventListener("change", e => {
+  const card = e.target.closest("[data-variant-index]");
+  const field = e.target.dataset.vfield;
+  if (!card || !field) return;
+  setVariantField(Number(card.dataset.variantIndex), field, e.target);
+});
+$("variantList").addEventListener("click", e => {
+  const remove = e.target.closest("[data-variant-remove]");
+  if (!remove) return;
+  const index = Number(remove.dataset.variantRemove);
+  variants.splice(index, 1);
+  if (variants.length && !variants.some(v => v.isDefault)) variants[0].isDefault = true;
+  renderVariants();
 });
 
 $("selectImagesBtn").addEventListener("click", e => {

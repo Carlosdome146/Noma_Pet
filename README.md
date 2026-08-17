@@ -1,67 +1,48 @@
-# NÓMA PET — Fase 6 completa · Stripe TEST
+# NÓMA PET — Fase 7: variantes
 
-Esta versión conserva D1, R2, admin, pedidos y seguimiento, y añade Stripe Checkout en modo TEST.
+Repositorio completo actualizado sobre la Fase 6.
 
-## Importante
+## Incluye
 
-Esta fase **rechaza claves live**. `STRIPE_SECRET_KEY` debe empezar por `sk_test_`. Los pedidos creados con Stripe TEST usan IDs `stripe_test_...` y códigos públicos `SNP-...`, por lo que se pueden borrar desde el admin.
+- Cloudflare Worker + Static Assets
+- D1 (`nomapet-db`)
+- R2 (`nomapet-images`)
+- `/admin` protegido con `ADMIN_TOKEN`
+- Catálogo, imágenes y proveedores
+- Pedidos + seguimiento
+- Stripe TEST + webhook firmado
+- **Variantes por producto**
+
+## Variantes
+
+La tabla `product_variants` permite guardar PVP, SKU, costes, peso, almacén, stock, plazo de envío, homologación y publicación por variante.
+
+La tienda, carrito, checkout, Stripe y pedidos entienden ahora `product + variant` como una línea de compra independiente.
+
+## Migración
+
+No hace falta ejecutar `schema.sql` sobre la D1 existente. El Worker ejecuta una migración idempotente al arrancar las rutas de API:
+
+- `CREATE TABLE IF NOT EXISTS product_variants ...`
+- añade `variant_id` y `variant_name` a `order_items` únicamente si faltan.
+
+Para una instalación desde cero, `schema.sql` ya contiene el esquema actualizado.
 
 ## Cloudflare
 
-Mantén:
+Se mantiene la configuración ya operativa:
 
-- D1: `nomapet-db` → binding `DB`
-- R2: `nomapet-images` → binding `PRODUCT_IMAGES`
-- Secret: `ADMIN_TOKEN`
-- Deploy command: `npx wrangler deploy`
+- Deploy: `npx wrangler deploy`
+- D1 binding: `DB`
+- R2 binding: `PRODUCT_IMAGES`
+- Secrets: `ADMIN_TOKEN`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`
 
-Añade como **Secrets de runtime** al Worker `noma-pet`:
+## Comprobación
 
-- `STRIPE_SECRET_KEY` = tu clave secreta TEST `sk_test_...`
-- `STRIPE_WEBHOOK_SECRET` = el signing secret del endpoint `whsec_...`
+Tras desplegar:
 
-Nunca subas estas claves a GitHub.
+1. `/api/health` debe seguir mostrando D1/R2/Stripe correctos y añade `variants`.
+2. `/admin/` debe mostrar la sección **Variantes** en el formulario de producto.
+3. Crea dos variantes de prueba y verifica carrito + Stripe TEST + pedido.
 
-## Webhook Stripe
-
-Endpoint:
-
-`https://TU-WORKER.workers.dev/api/stripe/webhook`
-
-Eventos recomendados para esta fase:
-
-- `checkout.session.completed`
-- `checkout.session.expired`
-- `checkout.session.async_payment_succeeded`
-- `checkout.session.async_payment_failed`
-
-Aunque Checkout está limitado a tarjeta en esta fase, el Worker soporta también los dos eventos async.
-
-## Flujo
-
-1. Cliente rellena `/checkout.html`.
-2. `/api/checkout/create` vuelve a leer productos/precios desde D1.
-3. Se crea pedido pendiente en D1.
-4. Worker crea Checkout Session TEST en Stripe.
-5. Cliente paga en la página alojada por Stripe.
-6. Stripe llama a `/api/stripe/webhook`.
-7. El Worker verifica `Stripe-Signature` sobre el body RAW con HMAC-SHA256 y tolerancia de 5 minutos.
-8. Solo entonces el pedido pasa de `pending` a `paid`.
-9. La página de éxito consulta D1 y espera unos segundos si el webhook aún no ha llegado.
-
-## Prueba
-
-Cuando `/api/health` muestre:
-
-```json
-{
-  "stripe": true,
-  "stripeMode": "test"
-}
-```
-
-añade un producto al carrito, abre checkout y usa una tarjeta TEST de Stripe, por ejemplo `4242 4242 4242 4242`, fecha futura y cualquier CVC de 3 cifras. No uses una tarjeta real.
-
-## No ejecutar schema.sql de nuevo
-
-El Worker crea automáticamente `stripe_webhook_events` si falta. El `schema.sql` se incluye actualizado solo como referencia para instalaciones nuevas.
+Después ya podemos homologar NÓMA Walk 10 ft y 16 ft.

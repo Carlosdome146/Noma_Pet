@@ -511,3 +511,28 @@ body.modal-open{
   .admin-order-grid{grid-template-columns:1fr}
   .admin-order-event{flex-direction:column;gap:4px}
 }
+
+/* FASE 7 · Variantes */
+.admin-variants-head{display:flex;justify-content:space-between;align-items:flex-end;gap:18px;margin-top:28px}
+.admin-variants-head .admin-section-title{margin:0 0 5px}
+.admin-variants-head .meta{margin:0;max-width:700px}
+.admin-variant-list{display:grid;gap:14px;margin-top:16px}
+.admin-variant-empty{margin-top:14px;border:1px dashed #cfd6d1;border-radius:16px;padding:18px;color:var(--muted);background:rgba(255,255,255,.45)}
+.variant-card{border:1px solid var(--line);background:#fff;border-radius:20px;padding:18px}
+.variant-card-head{display:flex;justify-content:space-between;gap:14px;align-items:center;margin-bottom:14px}
+.variant-card-title{display:flex;align-items:center;gap:10px;min-width:0}
+.variant-index{width:32px;height:32px;border-radius:11px;background:#edf2ef;color:var(--green);display:grid;place-items:center;font-weight:900;flex:0 0 auto}
+.variant-card-title b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.variant-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.variant-grid .field.span2{grid-column:span 2}
+.variant-grid .field.span4{grid-column:1/-1}
+.variant-flags{grid-column:1/-1;display:flex;gap:10px;flex-wrap:wrap;margin-top:2px}
+.variant-check{display:flex;align-items:center;gap:8px;border:1px solid var(--line);background:#f8faf9;border-radius:12px;padding:9px 11px;font-size:13px;font-weight:800}
+.variant-check input{width:17px;height:17px}
+.variant-remove{border:1px solid #efc8bf;background:#fff5f2;color:#9c3426;border-radius:999px;padding:8px 12px;font-weight:800;cursor:pointer}
+.variant-homologation{font-size:11px;font-weight:900;padding:5px 8px;border-radius:999px;background:#f2f2ef;color:#666}
+.variant-homologation.approved{background:#e8f2ed;color:#24503f}
+.variant-homologation.review{background:#fff5e9;color:#8c5a2b}
+.variant-homologation.rejected{background:#fff0ed;color:#9c3426}
+@media(max-width:900px){.variant-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.variant-grid .field.span2{grid-column:span 2}}
+@media(max-width:560px){.admin-variants-head{align-items:stretch;flex-direction:column}.variant-grid{grid-template-columns:1fr}.variant-grid .field.span2,.variant-grid .field.span4{grid-column:auto}.variant-card-head{align-items:flex-start}.variant-flags{flex-direction:column}}

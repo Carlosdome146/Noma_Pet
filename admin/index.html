@@ -113,7 +113,7 @@
           </div>
           <div class="field"><label>Etiqueta</label><input id="tag" maxlength="50" placeholder="TOP, VIAJE…"></div>
           <div class="field"><label>Emoji</label><input id="emoji" maxlength="12" value="🐾"></div>
-          <div class="field"><label>Precio PVP (€) *</label><input id="price" type="number" min="0" step="0.01" required></div>
+          <div class="field"><label>Precio base / sin variantes (€) *</label><input id="price" type="number" min="0" step="0.01" required></div>
           <div class="field"><label>Orden</label><input id="sortOrder" type="number" step="1" value="0"></div>
           <div class="field"><label>Stock</label>
             <select id="stockMode">
@@ -127,6 +127,16 @@
           <div class="field full"><label>Descripción completa</label><textarea id="description" rows="5"></textarea></div>
           <label class="admin-check full"><input id="published" type="checkbox"> <span>Publicado en la tienda</span></label>
         </div>
+
+        <div class="admin-variants-head">
+          <div>
+            <h3 class="admin-section-title">Variantes <span>(opcional)</span></h3>
+            <p class="meta">Cada variante puede tener su propio PVP, SKU, coste, peso, stock y logística. Si añades variantes, la tienda mostrará el precio mínimo como “Desde”.</p>
+          </div>
+          <button class="btn secondary" id="addVariantBtn" type="button">+ Añadir variante</button>
+        </div>
+        <div id="variantList" class="admin-variant-list"></div>
+        <div id="variantEmpty" class="admin-variant-empty">Este producto no tiene variantes. Se usará el precio y stock generales de arriba.</div>
 
         <h3 class="admin-section-title">Imágenes <span>(Cloudflare R2 · máximo 8)</span></h3>
         <input id="legacyImageUrl" type="hidden">
@@ -144,7 +154,7 @@
         <div id="imageError" class="form-error" hidden></div>
 
 
-        <h3 class="admin-section-title">Proveedor <span>(interno, no visible al cliente)</span></h3>
+        <h3 class="admin-section-title">Proveedor <span>(datos generales · las variantes pueden sobrescribir SKU/costes/logística)</span></h3>
         <div class="formgrid">
           <div class="field"><label>Proveedor</label><input id="supplier" maxlength="160"></div>
           <div class="field"><label>SKU proveedor</label><input id="supplierSku" maxlength="180"></div>

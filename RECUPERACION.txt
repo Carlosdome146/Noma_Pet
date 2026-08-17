@@ -1,19 +1,15 @@
-RECUPERACIÓN LIMPIA DEL REPOSITORIO
+RECUPERACIÓN LIMPIA · NÓMA PET FASE 7
 
-1. En GitHub, deja únicamente los archivos/carpetas incluidos en este ZIP.
-2. Asegúrate de NO conservar:
-   - wrangler.toml
-   - functions/
-   - versiones duplicadas de app.js
-   - archivos antiguos de admin
-3. Sube todo el contenido de este ZIP a la raíz del repositorio.
-4. Cloudflare debe ejecutar:
-   npx wrangler deploy
-5. Comprueba:
-   /api/health
-   /admin/
-   /tienda.html
-6. Si ves CSS antiguo, haz Ctrl+F5.
+Si vuelves a mezclar archivos:
+1. Deja en GitHub únicamente el contenido de este repositorio.
+2. No conserves wrangler.toml ni functions/.
+3. Mantén en Cloudflare:
+   - Deploy: npx wrangler deploy
+   - D1: nomapet-db (binding DB)
+   - R2: nomapet-images (binding PRODUCT_IMAGES)
+   - Secrets: ADMIN_TOKEN, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET
+4. Sube el repositorio completo.
+5. Comprueba /api/health, /admin/, /tienda.html y un pago Stripe TEST.
+6. Si ves estilos antiguos, Ctrl+F5.
 
-
-FASE 5: también deben existir checkout.html, pedido-exito.html, admin/pedidos.html y los JS/CSS de pedidos.
+La Fase 7 incluye variantes y migra D1 automáticamente; no ejecutes schema.sql sobre la base existente.
