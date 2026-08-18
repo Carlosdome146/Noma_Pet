@@ -39,7 +39,8 @@
         <div>
           <span class="eyebrow">Pedidos D1</span>
           <h1>Pedidos</h1>
-          <p class="lead">Prueba el flujo completo antes de conectar Stripe.</p>
+          <p class="lead">Gestiona pedidos, seguimiento y emails transaccionales.</p>
+          <div style="margin-top:10px"><span id="ordersEmailStatus" class="status draft">Email sin configurar</span></div>
         </div>
         <a class="btn primary" href="../checkout.html?test=1">+ Crear pedido de prueba</a>
       </div>
@@ -101,7 +102,7 @@
         </div>
         <div id="orderFormError" class="form-error" hidden></div>
         <div class="admin-modal-actions">
-          <button class="btn danger" id="deleteTestOrderBtn" type="button" hidden>Eliminar prueba</button>
+          <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn danger" id="deleteTestOrderBtn" type="button" hidden>Eliminar prueba</button><button class="btn secondary" id="sendOrderEmailBtn" type="button">Enviar / reenviar email</button></div>
           <div class="admin-modal-actions-right">
             <button class="btn secondary" type="button" data-close-order>Cerrar</button>
             <button class="btn primary" id="saveOrderBtn" type="submit">Guardar cambios</button>

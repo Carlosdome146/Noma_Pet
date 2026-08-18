@@ -732,6 +732,24 @@ async function ensureOrderSchema(env) {
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
       )
     `),
+    env.DB.prepare(`
+      CREATE TABLE IF NOT EXISTS order_emails (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_id TEXT NOT NULL,
+        email_type TEXT NOT NULL,
+        recipient TEXT NOT NULL,
+        original_recipient TEXT,
+        provider TEXT NOT NULL DEFAULT 'resend',
+        provider_message_id TEXT,
+        status TEXT NOT NULL DEFAULT 'pending',
+        error TEXT,
+        dedupe_key TEXT NOT NULL UNIQUE,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
+      )
+    `),
+    env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_order_emails_order ON order_emails (order_id, created_at)`),
     env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_order_events_order ON order_events (order_id, created_at)`),
     env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_orders_email_code ON orders (customer_email, public_code)`),
     env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_orders_stripe_session ON orders (stripe_checkout_session_id)`)
@@ -988,6 +1006,7 @@ async function createStripeSession(env, origin, customer, cart, orderId, publicC
 
 async function cleanupFailedStripeOrder(env, orderId) {
   await env.DB.batch([
+    env.DB.prepare("DELETE FROM order_emails WHERE order_id = ?").bind(orderId),
     env.DB.prepare("DELETE FROM order_events WHERE order_id = ?").bind(orderId),
     env.DB.prepare("DELETE FROM order_items WHERE order_id = ?").bind(orderId),
     env.DB.prepare("DELETE FROM order_addresses WHERE order_id = ?").bind(orderId),
@@ -1108,6 +1127,254 @@ async function verifyStripeWebhook(rawBody, signatureHeader, secret) {
   return signatures.some(signature => constantTimeStringEqual(expected, signature));
 }
 
+
+function escapeHtmlEmail(value) {
+  return String(value ?? "").replace(/[&<>"']/g, char => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  }[char]));
+}
+
+function emailConfig(env) {
+  const apiKey = typeof env.RESEND_API_KEY === "string" ? env.RESEND_API_KEY.trim() : "";
+  const customFrom = typeof env.EMAIL_FROM === "string" ? env.EMAIL_FROM.trim() : "";
+  const testRecipient = typeof env.EMAIL_TEST_RECIPIENT === "string" ? normalizeEmail(env.EMAIL_TEST_RECIPIENT) : "";
+  const replyTo = typeof env.EMAIL_REPLY_TO === "string" ? normalizeEmail(env.EMAIL_REPLY_TO) : "";
+
+  if (!apiKey || !apiKey.startsWith("re_")) {
+    return { enabled: false, mode: "disabled", provider: "resend", from: "", testRecipient, replyTo };
+  }
+  if (customFrom) {
+    return { enabled: true, mode: "domain", provider: "resend", from: customFrom, testRecipient, replyTo };
+  }
+  if (testRecipient) {
+    return {
+      enabled: true,
+      mode: "test",
+      provider: "resend",
+      from: "NÓMA PET <onboarding@resend.dev>",
+      testRecipient,
+      replyTo
+    };
+  }
+  return { enabled: false, mode: "disabled", provider: "resend", from: "", testRecipient: "", replyTo };
+}
+
+function emailModeLabel(env) {
+  return emailConfig(env).mode;
+}
+
+function emailSiteOrigin(requestOrOrigin) {
+  if (typeof requestOrOrigin === "string" && requestOrOrigin.startsWith("http")) return requestOrOrigin.replace(/\/$/, "");
+  try { return new URL(requestOrOrigin.url).origin; } catch (_) { return ""; }
+}
+
+function emailMoney(amount, currency = "EUR") {
+  try {
+    return new Intl.NumberFormat("es-ES", { style: "currency", currency }).format(Number(amount || 0));
+  } catch (_) {
+    return `${Number(amount || 0).toFixed(2)} ${currency}`;
+  }
+}
+
+function buildOrderEmail(order, type, origin, config) {
+  const isTest = Boolean(order.test);
+  const safeCode = escapeHtmlEmail(order.publicCode);
+  const safeName = escapeHtmlEmail(order.customerName || "");
+  const site = origin || "";
+  const trackingHref = order.trackingUrl || (site ? `${site}/seguimiento.html` : "");
+  const trackingCode = order.trackingCode || "";
+
+  const rows = (order.items || []).map(item => {
+    const variant = item.variantName ? ` <span style="color:#66756e">· ${escapeHtmlEmail(item.variantName)}</span>` : "";
+    const lineTotal = Number(item.unitPrice || 0) * Number(item.quantity || 0);
+    return `<tr><td style="padding:10px 0;border-bottom:1px solid #e7e2d8"><b>${escapeHtmlEmail(item.productName)}</b>${variant}<br><span style="color:#66756e">${Number(item.quantity || 0)} × ${emailMoney(item.unitPrice, order.currency)}</span></td><td style="padding:10px 0;border-bottom:1px solid #e7e2d8;text-align:right;font-weight:700">${emailMoney(lineTotal, order.currency)}</td></tr>`;
+  }).join("");
+
+  let title = "Pedido confirmado";
+  let intro = `Hemos recibido correctamente el pago de tu pedido <b>${safeCode}</b>.`;
+  let subject = `Pedido confirmado · ${order.publicCode}`;
+  let actionLabel = "Consultar pedido";
+  let actionHref = site ? `${site}/seguimiento.html` : "";
+
+  if (type === "shipped") {
+    title = "Tu pedido está en camino";
+    subject = `Tu pedido ${order.publicCode} ha sido enviado`;
+    intro = `Tu pedido <b>${safeCode}</b> ya ha sido enviado.`;
+    actionLabel = trackingUrlIsSafe(trackingHref) && order.trackingUrl ? "Abrir seguimiento" : "Consultar estado";
+    actionHref = trackingHref;
+  } else if (type === "delivered") {
+    title = "Pedido entregado";
+    subject = `Pedido ${order.publicCode} entregado`;
+    intro = `Hemos marcado tu pedido <b>${safeCode}</b> como entregado.`;
+    actionLabel = "Ver pedido";
+    actionHref = site ? `${site}/seguimiento.html` : "";
+  }
+
+  if (isTest) subject = `[TEST] ${subject}`;
+
+  const trackingBlock = type === "shipped" && trackingCode
+    ? `<div style="background:#edf3ef;border-radius:14px;padding:14px 16px;margin:18px 0"><div style="font-size:12px;color:#66756e;text-transform:uppercase;letter-spacing:.08em">Seguimiento</div><div style="font-size:18px;font-weight:800;margin-top:4px">${escapeHtmlEmail(trackingCode)}</div></div>`
+    : "";
+
+  const address = order.address || {};
+  const addressBlock = type === "confirmation"
+    ? `<div style="margin-top:22px"><div style="font-size:12px;color:#66756e;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">Entrega</div><div>${escapeHtmlEmail(address.line1 || "")}${address.line2 ? `<br>${escapeHtmlEmail(address.line2)}` : ""}<br>${escapeHtmlEmail(address.postalCode || "")} ${escapeHtmlEmail(address.city || "")}${address.province ? `, ${escapeHtmlEmail(address.province)}` : ""}</div></div>`
+    : "";
+
+  const testBanner = isTest ? `<div style="background:#fff0df;color:#9a4b16;border-radius:12px;padding:10px 12px;margin-bottom:20px;font-size:12px;font-weight:800">ENTORNO DE PRUEBA · No corresponde a un cobro real.</div>` : "";
+  const redirectedBanner = config.mode === "test"
+    ? `<div style="background:#eef1ff;color:#34427a;border-radius:12px;padding:10px 12px;margin-bottom:20px;font-size:12px">Modo email de prueba: este mensaje se ha redirigido al email configurado en EMAIL_TEST_RECIPIENT.</div>`
+    : "";
+
+  const button = actionHref
+    ? `<a href="${escapeHtmlEmail(actionHref)}" style="display:inline-block;background:#1f5b46;color:#fff;text-decoration:none;padding:12px 18px;border-radius:999px;font-weight:800;margin-top:20px">${escapeHtmlEmail(actionLabel)}</a>`
+    : "";
+
+  const html = `<!doctype html><html><body style="margin:0;background:#f5f1e9;font-family:Arial,Helvetica,sans-serif;color:#15241e"><div style="max-width:640px;margin:0 auto;padding:28px 16px"><div style="font-size:18px;font-weight:900;margin-bottom:18px">NÓMA PET</div><div style="background:#fff;border:1px solid #e3ded4;border-radius:24px;padding:28px">${testBanner}${redirectedBanner}<div style="font-size:12px;font-weight:800;color:#1f5b46;letter-spacing:.08em;text-transform:uppercase">${safeCode}</div><h1 style="font-size:30px;line-height:1.05;margin:10px 0 14px">${title}</h1><p style="font-size:16px;line-height:1.6;margin:0">Hola${safeName ? ` ${safeName}` : ""}. ${intro}</p>${trackingBlock}<table style="width:100%;border-collapse:collapse;margin-top:22px">${rows}</table><div style="display:flex;justify-content:space-between;gap:16px;margin-top:16px;font-size:18px"><b>Total</b><b>${emailMoney(order.total, order.currency)}</b></div>${addressBlock}${button}<p style="color:#66756e;font-size:12px;line-height:1.6;margin:28px 0 0">Si tienes alguna duda sobre tu pedido, responde a este correo o utiliza los datos de contacto de NÓMA PET.</p></div></div></body></html>`;
+
+  const textLines = [
+    `NÓMA PET — ${title}`,
+    `Pedido: ${order.publicCode}`,
+    "",
+    type === "confirmation" ? "Pago confirmado correctamente." : (type === "shipped" ? "Tu pedido ya ha sido enviado." : "Tu pedido figura como entregado."),
+    ...(trackingCode ? [`Seguimiento: ${trackingCode}`] : []),
+    "",
+    ...(order.items || []).map(item => `${item.quantity} x ${item.productName}${item.variantName ? ` (${item.variantName})` : ""} — ${emailMoney(Number(item.unitPrice || 0) * Number(item.quantity || 0), order.currency)}`),
+    "",
+    `Total: ${emailMoney(order.total, order.currency)}`,
+    ...(actionHref ? [`Más información: ${actionHref}`] : [])
+  ];
+
+  return { subject, html, text: textLines.join("\n") };
+}
+
+function trackingUrlIsSafe(value) {
+  if (!value) return false;
+  try {
+    const u = new URL(value);
+    return u.protocol === "https:" || u.protocol === "http:";
+  } catch (_) { return false; }
+}
+
+async function resendSend(env, payload, idempotencyKey) {
+  const config = emailConfig(env);
+  if (!config.enabled) throw new Error("EMAIL_NOT_CONFIGURED");
+
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${env.RESEND_API_KEY}`,
+      "Content-Type": "application/json",
+      "Idempotency-Key": idempotencyKey.slice(0, 256)
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const msg = data?.message || data?.error?.message || `Resend devolvió HTTP ${response.status}.`;
+    throw new Error(msg);
+  }
+  return data;
+}
+
+async function sendOrderEmail(env, orderId, emailType, origin, options = {}) {
+  await ensureOrderSchema(env);
+  const allowed = new Set(["confirmation", "shipped", "delivered"]);
+  if (!allowed.has(emailType)) throw new Error("Tipo de email no válido.");
+
+  const config = emailConfig(env);
+  if (!config.enabled) {
+    return { sent: false, skipped: true, reason: "EMAIL_NOT_CONFIGURED" };
+  }
+
+  const order = await getAdminOrder(env, orderId);
+  if (!order) throw new Error("Pedido no encontrado para enviar email.");
+
+  if (emailType === "confirmation" && !["paid", "test_paid"].includes(order.paymentStatus)) {
+    return { sent: false, skipped: true, reason: "PAYMENT_NOT_CONFIRMED" };
+  }
+  if (emailType === "shipped" && order.fulfillmentStatus !== "shipped" && !options.force) {
+    return { sent: false, skipped: true, reason: "NOT_SHIPPED" };
+  }
+  if (emailType === "delivered" && order.fulfillmentStatus !== "delivered" && !options.force) {
+    return { sent: false, skipped: true, reason: "NOT_DELIVERED" };
+  }
+
+  const originalRecipient = normalizeEmail(order.customerEmail);
+  let recipient = originalRecipient;
+  if (config.mode === "test") recipient = config.testRecipient;
+  else if (order.test && config.testRecipient) recipient = config.testRecipient;
+  if (!recipient) return { sent: false, skipped: true, reason: "MISSING_RECIPIENT" };
+
+  const force = Boolean(options.force);
+  const dedupeKey = force
+    ? `manual/${order.id}/${emailType}/${crypto.randomUUID()}`
+    : `auto/${order.id}/${emailType}`;
+
+  if (!force) {
+    const existing = await env.DB.prepare(`
+      SELECT status, provider_message_id FROM order_emails
+      WHERE dedupe_key = ? LIMIT 1
+    `).bind(dedupeKey).first();
+    if (existing && existing.status === "sent") {
+      return { sent: false, skipped: true, reason: "ALREADY_SENT", id: existing.provider_message_id || "" };
+    }
+  }
+
+  const email = buildOrderEmail(order, emailType, origin, config);
+  await env.DB.prepare(`
+    INSERT INTO order_emails (
+      order_id, email_type, recipient, original_recipient, provider, status, dedupe_key, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, 'resend', 'pending', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    ON CONFLICT(dedupe_key) DO UPDATE SET
+      recipient = excluded.recipient,
+      original_recipient = excluded.original_recipient,
+      status = 'pending', error = NULL, updated_at = CURRENT_TIMESTAMP
+  `).bind(order.id, emailType, recipient, originalRecipient, dedupeKey).run();
+
+  const payload = {
+    from: config.from,
+    to: [recipient],
+    subject: config.mode === "test" && originalRecipient && recipient !== originalRecipient
+      ? `${email.subject} · destinatario real: ${originalRecipient}`
+      : email.subject,
+    html: email.html,
+    text: email.text
+  };
+  if (config.replyTo) payload.reply_to = config.replyTo;
+
+  try {
+    const result = await resendSend(env, payload, dedupeKey);
+    const providerId = cleanText(result?.id, 200);
+    await env.DB.prepare(`
+      UPDATE order_emails
+      SET status = 'sent', provider_message_id = ?, error = NULL, updated_at = CURRENT_TIMESTAMP
+      WHERE dedupe_key = ?
+    `).bind(providerId || null, dedupeKey).run();
+    await addOrderEvent(env, order.id, "email_sent", `Email ${emailType} enviado a ${recipient}${config.mode === "test" ? " (modo prueba)" : ""}.`);
+    return { sent: true, skipped: false, id: providerId, recipient, mode: config.mode };
+  } catch (error) {
+    const message = String(error?.message || error).slice(0, 1000);
+    await env.DB.prepare(`
+      UPDATE order_emails
+      SET status = 'failed', error = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE dedupe_key = ?
+    `).bind(message, dedupeKey).run();
+    await addOrderEvent(env, order.id, "email_failed", `No se pudo enviar el email ${emailType}: ${message}`);
+    throw error;
+  }
+}
+
+async function sendOrderEmailSafe(env, orderId, emailType, origin, options = {}) {
+  try {
+    return await sendOrderEmail(env, orderId, emailType, origin, options);
+  } catch (error) {
+    console.error(`Email ${emailType} error:`, error);
+    return { sent: false, skipped: false, error: String(error?.message || error) };
+  }
+}
+
 function stripeObjectId(value) {
   if (!value) return null;
   if (typeof value === "string") return value;
@@ -1123,7 +1390,7 @@ async function addOrderEvent(env, orderId, eventType, message) {
   `).bind(orderId, eventType, message).run();
 }
 
-async function applyStripeSessionEvent(env, eventType, session) {
+async function applyStripeSessionEvent(env, eventType, session, origin = "") {
   const orderId = cleanText(session?.metadata?.order_id || session?.client_reference_id, 160);
   if (!orderId) return;
 
@@ -1135,6 +1402,7 @@ async function applyStripeSessionEvent(env, eventType, session) {
   `).bind(orderId).first();
   if (!order) return;
 
+  const previousPaymentStatus = order.payment_status || "pending";
   const sessionId = stripeObjectId(session?.id);
   const paymentIntentId = stripeObjectId(session?.payment_intent);
 
@@ -1161,6 +1429,9 @@ async function applyStripeSessionEvent(env, eventType, session) {
         WHERE id = ?
       `).bind(sessionId, paymentIntentId, orderId).run();
       await addOrderEvent(env, orderId, "stripe_paid", "Pago confirmado por webhook firmado de Stripe TEST.");
+      if (previousPaymentStatus !== "paid") {
+        await sendOrderEmailSafe(env, orderId, "confirmation", origin);
+      }
       return;
     }
 
@@ -1235,7 +1506,7 @@ async function handleStripeWebhook(request, env) {
   ]);
 
   if (supported.has(event.type)) {
-    await applyStripeSessionEvent(env, event.type, event.data?.object || {});
+    await applyStripeSessionEvent(env, event.type, event.data?.object || {}, new URL(request.url).origin);
   }
 
   await env.DB.prepare(`
@@ -1299,7 +1570,7 @@ async function getAdminOrder(env, orderId) {
 
   if (!order) return null;
 
-  const [itemsResult, eventsResult] = await env.DB.batch([
+  const [itemsResult, eventsResult, emailsResult] = await env.DB.batch([
     env.DB.prepare(`
       SELECT id, product_id, product_name, variant_id, variant_name, quantity, unit_price_cents,
              supplier, supplier_sku
@@ -1310,6 +1581,12 @@ async function getAdminOrder(env, orderId) {
     env.DB.prepare(`
       SELECT id, event_type, message, created_at
       FROM order_events
+      WHERE order_id = ?
+      ORDER BY created_at DESC, id DESC
+    `).bind(orderId),
+    env.DB.prepare(`
+      SELECT id, email_type, recipient, original_recipient, provider_message_id, status, error, created_at, updated_at
+      FROM order_emails
       WHERE order_id = ?
       ORDER BY created_at DESC, id DESC
     `).bind(orderId)
@@ -1358,6 +1635,17 @@ async function getAdminOrder(env, orderId) {
       type: event.event_type,
       message: event.message || "",
       createdAt: event.created_at
+    })),
+    emails: (emailsResult.results || []).map(email => ({
+      id: Number(email.id),
+      type: email.email_type,
+      recipient: email.recipient || "",
+      originalRecipient: email.original_recipient || "",
+      providerMessageId: email.provider_message_id || "",
+      status: email.status || "pending",
+      error: email.error || "",
+      createdAt: email.created_at,
+      updatedAt: email.updated_at
     }))
   };
 }
@@ -1373,6 +1661,9 @@ async function updateAdminOrder(request, env, orderId) {
 
   const trackingCode = nullableText(body.trackingCode, 180);
   const trackingUrl = nullableText(body.trackingUrl, 1200);
+  if (trackingUrl && !trackingUrlIsSafe(trackingUrl)) {
+    return json({ ok: false, error: "INVALID_TRACKING_URL", message: "La URL de seguimiento debe comenzar por http:// o https://." }, { status: 400 });
+  }
 
   const current = await env.DB.prepare(`
     SELECT id, fulfillment_status FROM orders WHERE id = ? LIMIT 1
@@ -1381,6 +1672,7 @@ async function updateAdminOrder(request, env, orderId) {
     return json({ ok: false, error: "NOT_FOUND", message: "Pedido no encontrado." }, { status: 404 });
   }
 
+  const changedStatus = current.fulfillment_status !== fulfillmentStatus;
   const statements = [
     env.DB.prepare(`
       UPDATE orders
@@ -1389,7 +1681,7 @@ async function updateAdminOrder(request, env, orderId) {
     `).bind(fulfillmentStatus, trackingCode, trackingUrl, orderId)
   ];
 
-  if (current.fulfillment_status !== fulfillmentStatus) {
+  if (changedStatus) {
     statements.push(env.DB.prepare(`
       INSERT INTO order_events (order_id, event_type, message)
       VALUES (?, 'fulfillment_updated', ?)
@@ -1404,7 +1696,37 @@ async function updateAdminOrder(request, env, orderId) {
   }
 
   await env.DB.batch(statements);
-  return json({ ok: true, order: await getAdminOrder(env, orderId) }, { headers: { "Cache-Control": "no-store" } });
+
+  let emailResult = null;
+  const origin = new URL(request.url).origin;
+  if (changedStatus && fulfillmentStatus === "shipped") {
+    emailResult = await sendOrderEmailSafe(env, orderId, "shipped", origin);
+  } else if (changedStatus && fulfillmentStatus === "delivered") {
+    emailResult = await sendOrderEmailSafe(env, orderId, "delivered", origin);
+  }
+
+  return json({ ok: true, order: await getAdminOrder(env, orderId), email: emailResult }, { headers: { "Cache-Control": "no-store" } });
+}
+
+async function resendAdminOrderEmail(request, env, orderId) {
+  await ensureOrderSchema(env);
+  const body = await readJson(request).catch(() => ({}));
+  const order = await getAdminOrder(env, orderId);
+  if (!order) return json({ ok: false, error: "NOT_FOUND", message: "Pedido no encontrado." }, { status: 404 });
+
+  let type = cleanText(body.type, 30);
+  if (!type) {
+    if (order.fulfillmentStatus === "delivered") type = "delivered";
+    else if (order.fulfillmentStatus === "shipped") type = "shipped";
+    else type = "confirmation";
+  }
+
+  try {
+    const result = await sendOrderEmail(env, orderId, type, new URL(request.url).origin, { force: true });
+    return json({ ok: true, email: result, order: await getAdminOrder(env, orderId) }, { headers: { "Cache-Control": "no-store" } });
+  } catch (error) {
+    return json({ ok: false, error: "EMAIL_SEND_FAILED", message: String(error?.message || error) }, { status: 400, headers: { "Cache-Control": "no-store" } });
+  }
 }
 
 async function deleteTestOrder(env, orderId) {
@@ -1413,6 +1735,7 @@ async function deleteTestOrder(env, orderId) {
     return json({ ok: false, error: "FORBIDDEN", message: "Solo se pueden borrar pedidos de prueba." }, { status: 403 });
   }
   await env.DB.batch([
+    env.DB.prepare("DELETE FROM order_emails WHERE order_id = ?").bind(orderId),
     env.DB.prepare("DELETE FROM order_events WHERE order_id = ?").bind(orderId),
     env.DB.prepare("DELETE FROM order_items WHERE order_id = ?").bind(orderId),
     env.DB.prepare("DELETE FROM order_addresses WHERE order_id = ?").bind(orderId),
@@ -1483,7 +1806,8 @@ async function handleAdminApi(request, env, url) {
   await ensureCatalogSchema(env);
 
   if (url.pathname === "/api/admin/session" && request.method === "GET") {
-    return json({ ok: true, r2: Boolean(env.PRODUCT_IMAGES) }, { headers: { "Cache-Control": "no-store" } });
+    const mail = emailConfig(env);
+    return json({ ok: true, r2: Boolean(env.PRODUCT_IMAGES), email: mail.enabled, emailMode: mail.mode, emailProvider: mail.provider }, { headers: { "Cache-Control": "no-store" } });
   }
 
   if (url.pathname === "/api/admin/orders/test" && request.method === "POST") {
@@ -1492,6 +1816,11 @@ async function handleAdminApi(request, env, url) {
 
   if (url.pathname === "/api/admin/orders" && request.method === "GET") {
     return json({ ok: true, orders: await listAdminOrders(env) }, { headers: { "Cache-Control": "no-store" } });
+  }
+
+  const orderEmailMatch = url.pathname.match(/^\/api\/admin\/orders\/([^/]+)\/email$/);
+  if (orderEmailMatch && request.method === "POST") {
+    return resendAdminOrderEmail(request, env, decodeURIComponent(orderEmailMatch[1]));
   }
 
   const orderMatch = url.pathname.match(/^\/api\/admin\/orders\/([^/]+)$/);
@@ -1623,7 +1952,7 @@ async function handlePublicApi(request, env, url) {
         env.DB.prepare("SELECT COUNT(*) AS total FROM product_variants").first()
       ]);
       return json(
-        { ok: true, database: "connected", products: Number(productRow?.total || 0), variants: Number(variantRow?.total || 0), r2: Boolean(env.PRODUCT_IMAGES), orders: true, stripe: stripeTestConfigured(env), stripeMode: stripeTestConfigured(env) ? "test" : "disabled" },
+        { ok: true, database: "connected", products: Number(productRow?.total || 0), variants: Number(variantRow?.total || 0), r2: Boolean(env.PRODUCT_IMAGES), orders: true, stripe: stripeTestConfigured(env), stripeMode: stripeTestConfigured(env) ? "test" : "disabled", email: emailConfig(env).enabled, emailMode: emailModeLabel(env), emailProvider: "resend" },
         { headers: { "Cache-Control": "no-store" } }
       );
     } catch (error) {

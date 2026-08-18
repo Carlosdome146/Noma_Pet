@@ -1,48 +1,49 @@
-# NÓMA PET — Fase 7: variantes
+# NÓMA PET · Fase 8
 
-Repositorio completo actualizado sobre la Fase 6.
+Repositorio completo actual de NÓMA PET.
 
 ## Incluye
 
 - Cloudflare Worker + Static Assets
 - D1 (`nomapet-db`)
 - R2 (`nomapet-images`)
-- `/admin` protegido con `ADMIN_TOKEN`
-- Catálogo, imágenes y proveedores
-- Pedidos + seguimiento
-- Stripe TEST + webhook firmado
-- **Variantes por producto**
+- Admin de productos y variantes
+- Pedidos y seguimiento
+- Stripe Checkout TEST + webhook firmado
+- Emails transaccionales con Resend
+- Historial de emails por pedido
 
-## Variantes
+## Emails
 
-La tabla `product_variants` permite guardar PVP, SKU, costes, peso, almacén, stock, plazo de envío, homologación y publicación por variante.
+Variables/runtime disponibles:
 
-La tienda, carrito, checkout, Stripe y pedidos entienden ahora `product + variant` como una línea de compra independiente.
+- `RESEND_API_KEY` — Secret
+- `EMAIL_TEST_RECIPIENT` — modo prueba sin dominio
+- `EMAIL_FROM` — remitente con dominio verificado para producción
+- `EMAIL_REPLY_TO` — opcional
 
-## Migración
+Si existe `RESEND_API_KEY` + `EMAIL_TEST_RECIPIENT` y no existe `EMAIL_FROM`, se activa `emailMode: test` y se usa `onboarding@resend.dev`.
 
-No hace falta ejecutar `schema.sql` sobre la D1 existente. El Worker ejecuta una migración idempotente al arrancar las rutas de API:
+Si existe `RESEND_API_KEY` + `EMAIL_FROM`, se activa `emailMode: domain` y se envía al cliente real. Los pedidos de prueba pueden seguir redirigiéndose a `EMAIL_TEST_RECIPIENT` si está configurado.
 
-- `CREATE TABLE IF NOT EXISTS product_variants ...`
-- añade `variant_id` y `variant_name` a `order_items` únicamente si faltan.
+## Emails automáticos
 
-Para una instalación desde cero, `schema.sql` ya contiene el esquema actualizado.
+1. Pago confirmado por webhook de Stripe → `confirmation`
+2. Pedido marcado como enviado → `shipped`
+3. Pedido marcado como entregado → `delivered`
 
-## Cloudflare
+El admin permite reenviar manualmente el email correspondiente al estado actual.
 
-Se mantiene la configuración ya operativa:
+## Migraciones
 
-- Deploy: `npx wrangler deploy`
-- D1 binding: `DB`
-- R2 binding: `PRODUCT_IMAGES`
-- Secrets: `ADMIN_TOKEN`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`
+No hay que volver a ejecutar `schema.sql` sobre una D1 ya existente. El Worker crea automáticamente `order_emails`.
 
-## Comprobación
+## Despliegue
 
-Tras desplegar:
+El proyecto mantiene:
 
-1. `/api/health` debe seguir mostrando D1/R2/Stripe correctos y añade `variants`.
-2. `/admin/` debe mostrar la sección **Variantes** en el formulario de producto.
-3. Crea dos variantes de prueba y verifica carrito + Stripe TEST + pedido.
+```text
+npx wrangler deploy
+```
 
-Después ya podemos homologar NÓMA Walk 10 ft y 16 ft.
+Consulta `INSTRUCCIONES-FASE8.txt` para configurar Resend paso a paso.

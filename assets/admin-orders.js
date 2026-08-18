@@ -10,6 +10,7 @@ const P_LABEL = {pending:"Pendiente",paid:"Pagado",test_paid:"TEST",refunded:"Re
 let orderToken = sessionStorage.getItem(ORDER_TOKEN_KEY) || "";
 let orders = [];
 let currentOrder = null;
+let adminSession = null;
 
 function setLoginError(message=""){const el=$o("ordersLoginError");el.hidden=!message;el.textContent=message}
 function setFormError(message=""){const el=$o("orderFormError");el.hidden=!message;el.textContent=message}
@@ -27,7 +28,21 @@ async function api(path, options={}) {
 
 async function validateSession() {
   const data = await api("/api/admin/session");
+  adminSession = data;
+  renderEmailStatus();
   return data.ok;
+}
+
+function renderEmailStatus(){
+  const el=$o("ordersEmailStatus");
+  if(!el||!adminSession)return;
+  if(adminSession.email){
+    el.className="status";
+    el.textContent=adminSession.emailMode==="test"?"Email Resend · TEST":"Email Resend · ACTIVO";
+  }else{
+    el.className="status draft";
+    el.textContent="Email sin configurar";
+  }
 }
 
 function showDashboard() {
@@ -97,6 +112,9 @@ async function openOrder(id){
   const events=(o.events||[]).map(e=>`
     <div class="admin-order-event"><b>${escO(e.message||e.type)}</b><span>${dtO(e.createdAt)}</span></div>`).join("");
 
+  const emails=(o.emails||[]).map(e=>`
+    <div class="admin-order-event"><b>${e.status==="sent"?"✓":"!"} ${escO(e.type)} · ${escO(e.status)}</b><span>${escO(e.recipient||"")} · ${dtO(e.createdAt)}</span>${e.error?`<div class="meta" style="color:#9c3426">${escO(e.error)}</div>`:""}</div>`).join("");
+
   $o("orderDetailBody").innerHTML=`
     ${o.stripeTest?'<div class="order-admin-test-banner">STRIPE TEST · No existe cobro real</div>':(o.test?'<div class="order-admin-test-banner">PEDIDO DE PRUEBA ADMIN · No existe cobro real</div>':"")}
     <div class="admin-order-grid">
@@ -107,6 +125,8 @@ async function openOrder(id){
     ${o.address.notes?`<div class="notice"><b>Notas cliente:</b> ${escO(o.address.notes)}</div>`:""}
     <h3 class="admin-section-title">Artículos</h3>
     <div class="admin-order-items">${items}</div>
+    <h3 class="admin-section-title">Emails</h3>
+    <div class="admin-order-events">${emails||'<div class="meta">Todavía no hay emails registrados para este pedido.</div>'}</div>
     <h3 class="admin-section-title">Historial</h3>
     <div class="admin-order-events">${events||'<div class="meta">Sin eventos todavía.</div>'}</div>`;
 
@@ -159,9 +179,23 @@ document.addEventListener("DOMContentLoaded", async()=>{
       currentOrder=data.order;
       await loadOrders();
       closeOrder();
-      flash("Pedido actualizado.");
+      if(data.email?.error) flash(`Pedido actualizado. Email no enviado: ${data.email.error}`,"error");
+      else if(data.email?.sent) flash("Pedido actualizado y email enviado.");
+      else flash("Pedido actualizado.");
     }catch(err){setFormError(err.message)}
     finally{button.disabled=false}
+  });
+
+  $o("sendOrderEmailBtn").addEventListener("click",async()=>{
+    if(!currentOrder)return;
+    const btn=$o("sendOrderEmailBtn");btn.disabled=true;setFormError();
+    try{
+      const data=await api(`/api/admin/orders/${encodeURIComponent(currentOrder.id)}/email`,{method:"POST",body:JSON.stringify({})});
+      currentOrder=data.order;
+      flash(data.email?.sent?"Email enviado.":"No se envió ningún email.",data.email?.sent?"success":"error");
+      await openOrder(currentOrder.id);
+    }catch(err){setFormError(err.message)}
+    finally{btn.disabled=false}
   });
 
   $o("deleteTestOrderBtn").addEventListener("click",async()=>{

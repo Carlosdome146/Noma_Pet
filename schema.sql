@@ -197,3 +197,22 @@ CREATE TABLE IF NOT EXISTS stripe_webhook_events (
 );
 
 CREATE INDEX IF NOT EXISTS idx_orders_stripe_session ON orders (stripe_checkout_session_id);
+
+-- FASE 8 · Registro de emails transaccionales (Resend).
+-- El Worker crea esta tabla automáticamente; no hace falta volver a ejecutar schema.sql.
+CREATE TABLE IF NOT EXISTS order_emails (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id TEXT NOT NULL,
+  email_type TEXT NOT NULL,
+  recipient TEXT NOT NULL,
+  original_recipient TEXT,
+  provider TEXT NOT NULL DEFAULT 'resend',
+  provider_message_id TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  error TEXT,
+  dedupe_key TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_order_emails_order ON order_emails (order_id, created_at);
