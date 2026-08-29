@@ -25,7 +25,7 @@
       <div class="container">
         <span class="eyebrow">Checkout</span>
         <h1>Datos de envío.</h1>
-        <p class="lead">Primero guardamos los datos del pedido y después Stripe abre su página segura de pago. Esta fase usa exclusivamente Stripe TEST.</p>
+        <p class="lead">Revisa tus datos, los plazos de cada artículo y el total antes de continuar al pago seguro de Stripe.</p>
 
         <div id="testModeNotice" class="notice order-test-notice" hidden></div>
 
@@ -65,6 +65,10 @@
               </label>
             </div>
 
+            <label class="checkout-consent">
+              <input type="checkbox" id="acceptTerms" required>
+              <span>He leído y acepto las <a href="condiciones.html" target="_blank">Condiciones de compra</a>, la <a href="privacidad.html" target="_blank">Política de privacidad</a> y la información sobre <a href="devoluciones.html" target="_blank">devoluciones y desistimiento</a>. Entiendo que confirmar el pedido implica una obligación de pago.</span>
+            </label>
             <div id="checkoutError" class="form-error" hidden></div>
             <button id="checkoutSubmit" class="btn primary checkout-submit" type="submit" disabled>Comprobando Stripe…</button>
             <p class="tiny" id="checkoutHelp">No utilices una tarjeta real. Usaremos tarjetas de prueba de Stripe.</p>

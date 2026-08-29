@@ -120,7 +120,7 @@ async function openOrder(id){
     <div class="admin-order-grid">
       <div class="admin-order-box"><span>Cliente</span><b>${escO(o.customerName)}</b><p>${escO(o.customerEmail)}${o.address.phone?`<br>${escO(o.address.phone)}`:""}</p></div>
       <div class="admin-order-box"><span>Entrega</span><b>${escO(o.address.line1||"—")}</b><p>${o.address.line2?escO(o.address.line2)+"<br>":""}${escO(o.address.postalCode)} ${escO(o.address.city)}${o.address.province?`, ${escO(o.address.province)}`:""}</p></div>
-      <div class="admin-order-box"><span>Total</span><b>${moneyO(o.total,o.currency)}</b><p>Pago: ${escO(P_LABEL[o.paymentStatus]||o.paymentStatus)}${o.stripeCheckoutSessionId?`<br><span class="meta">Stripe: ${escO(o.stripeCheckoutSessionId)}</span>`:""}${o.stripePaymentIntentId?`<br><span class="meta">PaymentIntent: ${escO(o.stripePaymentIntentId)}</span>`:""}</p></div>
+      <div class="admin-order-box"><span>Total</span><b>${moneyO(o.total,o.currency)}</b><p>Productos: ${moneyO(o.subtotal ?? o.total,o.currency)}<br>Envío: ${Number(o.shipping||0)>0?moneyO(o.shipping,o.currency):"Gratis"}<br>Pago: ${escO(P_LABEL[o.paymentStatus]||o.paymentStatus)}${o.stripeCheckoutSessionId?`<br><span class="meta">Stripe: ${escO(o.stripeCheckoutSessionId)}</span>`:""}${o.stripePaymentIntentId?`<br><span class="meta">PaymentIntent: ${escO(o.stripePaymentIntentId)}</span>`:""}</p></div>
     </div>
     ${o.address.notes?`<div class="notice"><b>Notas cliente:</b> ${escO(o.address.notes)}</div>`:""}
     <h3 class="admin-section-title">Artículos</h3>

@@ -11,11 +11,14 @@ let cartRows = [];
 let isAdminTestMode = false;
 let stripeTestReady = false;
 let adminToken = "";
+let shippingFlat = 3.90;
+let freeShippingThreshold = 39.90;
 
 function readCart() { try { return JSON.parse(localStorage.getItem(CART_KEY) || "[]"); } catch (_) { return []; } }
 function variantsOf(p) { return Array.isArray(p?.variants) ? p.variants : []; }
 function defaultVariant(p) { const list=variantsOf(p); return list.find(v=>v.id===p.defaultVariantId)||list.find(v=>v.isDefault)||list[0]||null; }
 function variantById(p,id) { return variantsOf(p).find(v=>v.id===id)||defaultVariant(p); }
+function logisticsOf(p,v){return {warehouse:v?.warehouse||p?.warehouse||"",min:v?.shippingDaysMin??p?.shippingDaysMin??null,max:v?.shippingDaysMax??p?.shippingDaysMax??null}}
 
 async function loadProducts() {
   const res = await fetch("/api/products", { headers: { Accept: "application/json" } });
@@ -46,20 +49,18 @@ function renderSummary() {
   if (!cartRows.length) {
     items.innerHTML = `<div class="checkout-empty">Tu carrito está vacío.</div>`;
     totals.innerHTML = `<a class="btn primary" style="width:100%" href="tienda.html">Ir a tienda</a>`;
-    $("checkoutSubmit").disabled = true;
-    return;
+    $("checkoutSubmit").disabled = true; return;
   }
-  let total = 0;
+  let subtotal = 0; const groups=new Set();
   items.innerHTML = cartRows.map(({ product:p, variant:v, qty }) => {
-    const price = Number(v?.price ?? p.price ?? 0);
-    const line = price * qty; total += line;
-    return `<div class="checkout-line">
-      <div class="checkout-line-media">${p.imageUrl ? `<img src="${escapeHtml(p.imageUrl)}" alt="">` : escapeHtml(p.emoji || "🐾")}</div>
-      <div><b>${escapeHtml(p.name)}</b>${v?`<span class="checkout-variant">${escapeHtml(v.name)}</span>`:""}<span>${qty} × ${money(price)}</span></div>
-      <strong>${money(line)}</strong>
-    </div>`;
+    const price=Number(v?.price??p.price??0), line=price*qty; subtotal+=line;
+    const l=logisticsOf(p,v); const log=[l.warehouse?`Envío desde ${escapeHtml(l.warehouse)}`:"",(l.min!=null&&l.max!=null)?`${l.min}–${l.max} días`:""].filter(Boolean).join(" · ");
+    if(log)groups.add(`${l.warehouse}|${l.min}|${l.max}`);
+    return `<div class="checkout-line"><div class="checkout-line-media">${p.imageUrl?`<img src="${escapeHtml(p.imageUrl)}" alt="">`:escapeHtml(p.emoji||"🐾")}</div><div><b>${escapeHtml(p.name)}</b>${v?`<span class="checkout-variant">${escapeHtml(v.name)}</span>`:""}<span>${qty} × ${money(price)}</span>${log?`<span class="checkout-logistics">${log}</span>`:""}</div><strong>${money(line)}</strong></div>`;
   }).join("");
-  totals.innerHTML = `<div class="row"><span>Productos</span><b>${money(total)}</b></div><div class="row"><span>Envío</span><span>0,00 € en esta prueba</span></div><div class="row total"><span>Total</span><span>${money(total)}</span></div>`;
+  const shipping=subtotal>=freeShippingThreshold?0:shippingFlat, total=subtotal+shipping;
+  const split=groups.size>1?`<div class="notice split-shipment-notice"><b>Entrega en varios paquetes.</b> Algunos artículos tienen orígenes o plazos distintos, por lo que pueden llegar por separado.</div>`:"";
+  totals.innerHTML = `${split}<div class="row"><span>Productos</span><b>${money(subtotal)}</b></div><div class="row"><span>Envío</span><b>${shipping?money(shipping):"Gratis"}</b></div><div class="row total"><span>Total</span><span>${money(total)}</span></div>${subtotal<freeShippingThreshold ? `<p class="tiny">Envío gratis desde ${money(freeShippingThreshold)}.</p>` : `<p class="tiny">Has conseguido envío gratis.</p>`}`;
 }
 
 function formPayload() {
@@ -97,7 +98,7 @@ async function submitCheckout(event) {
 }
 
 async function init() {
-  try { const [_, health] = await Promise.all([loadProducts(), loadHealth()]); stripeTestReady=health.stripe===true&&health.stripeMode==="test"; buildCartRows(); renderSummary(); }
+  try { const [_, health] = await Promise.all([loadProducts(), loadHealth()]); stripeTestReady=health.stripe===true&&health.stripeMode==="test"; shippingFlat=Number(health.shippingFlat??3.90); freeShippingThreshold=Number(health.freeShippingThreshold??39.90); buildCartRows(); renderSummary(); }
   catch(error){setError(error.message);return}
   adminToken=sessionStorage.getItem(ADMIN_TOKEN_KEY)||"";
   const params=new URLSearchParams(location.search),requestedAdminTest=params.get("test")==="1",cancelled=params.get("cancel")==="1";

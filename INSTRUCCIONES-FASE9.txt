@@ -1,0 +1,12 @@
+NÓMA PET — FASE 9 PRELANZAMIENTO (sin dominio)
+
+1. Sube TODO este repositorio a GitHub.
+2. No ejecutes schema.sql de nuevo. El Worker migra automáticamente orders para añadir subtotal_cents y shipping_cents.
+3. Mantén Stripe en TEST.
+4. Comprueba /api/health. Ahora incluye shippingFlat=3.9 y freeShippingThreshold=39.9.
+5. Haz un pedido Stripe TEST por debajo de 39,90 €: Stripe debe cobrar 3,90 € de envío.
+6. Haz otro pedido con subtotal >=39,90 €: envío gratis.
+7. Comprueba emails, admin y seguimiento.
+8. Revisa condiciones.html, envios.html y devoluciones.html.
+
+IMPORTANTE: aviso-legal.html y privacidad.html siguen marcando datos del titular como PENDIENTES. Antes de Stripe LIVE necesitaremos nombre/razón social, NIF/CIF, domicilio y email de contacto del vendedor.

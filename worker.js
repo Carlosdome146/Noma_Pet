@@ -2,6 +2,8 @@ const JSON_HEADERS = { "Content-Type": "application/json; charset=utf-8" };
 const MAX_IMAGES_PER_PRODUCT = 8;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/avif"]);
+const SHIPPING_FLAT_CENTS = 390;
+const FREE_SHIPPING_THRESHOLD_CENTS = 3990;
 const IMAGE_EXTENSIONS = {
   "image/jpeg": "jpg",
   "image/png": "png",
@@ -227,7 +229,10 @@ function mapPublicProduct(p) {
     currency: p.currency,
     stockMode: p.stock_mode,
     stockQty: p.stock_qty,
-    imageUrl: p.image_url
+    imageUrl: p.image_url,
+    warehouse: p.warehouse || "",
+    shippingDaysMin: p.shipping_days_min == null ? null : Number(p.shipping_days_min),
+    shippingDaysMax: p.shipping_days_max == null ? null : Number(p.shipping_days_max)
   };
 }
 
@@ -763,6 +768,15 @@ async function ensureOrderSchema(env) {
   if (!names.has("variant_name")) {
     await env.DB.prepare("ALTER TABLE order_items ADD COLUMN variant_name TEXT").run();
   }
+
+  const orderColumns = await env.DB.prepare("PRAGMA table_info(orders)").all();
+  const orderNames = new Set((orderColumns.results || []).map(x => String(x.name)));
+  if (!orderNames.has("subtotal_cents")) {
+    await env.DB.prepare("ALTER TABLE orders ADD COLUMN subtotal_cents INTEGER NOT NULL DEFAULT 0").run();
+  }
+  if (!orderNames.has("shipping_cents")) {
+    await env.DB.prepare("ALTER TABLE orders ADD COLUMN shipping_cents INTEGER NOT NULL DEFAULT 0").run();
+  }
   orderSchemaReady = true;
 }
 
@@ -813,9 +827,11 @@ async function resolveOrderItems(env, rawItems) {
       p.id, p.name, p.price_cents, p.currency, p.published,
       p.stock_mode, p.stock_qty,
       s.supplier, s.supplier_sku AS base_supplier_sku,
+      s.warehouse AS base_warehouse, s.shipping_days_min AS base_shipping_days_min, s.shipping_days_max AS base_shipping_days_max,
       v.id AS variant_id, v.name AS variant_name, v.price_cents AS variant_price_cents,
       v.supplier_sku AS variant_supplier_sku, v.published AS variant_published,
       v.stock_status AS variant_stock_status, v.supplier_stock_qty,
+      v.warehouse AS variant_warehouse, v.shipping_days_min AS variant_shipping_days_min, v.shipping_days_max AS variant_shipping_days_max,
       (SELECT COUNT(*) FROM product_variants vc WHERE vc.product_id = p.id AND vc.published = 1) AS published_variant_count
     FROM products p
     LEFT JOIN product_sources s
@@ -865,7 +881,10 @@ async function resolveOrderItems(env, rawItems) {
       unitPriceCents: hasVariants ? Number(row.variant_price_cents || 0) : Number(row.price_cents || 0),
       currency: row.currency || "EUR",
       supplier: row.supplier || null,
-      supplierSku: row.variant_supplier_sku || row.base_supplier_sku || null
+      supplierSku: row.variant_supplier_sku || row.base_supplier_sku || null,
+      warehouse: row.variant_warehouse || row.base_warehouse || "",
+      shippingDaysMin: row.variant_shipping_days_min == null ? (row.base_shipping_days_min == null ? null : Number(row.base_shipping_days_min)) : Number(row.variant_shipping_days_min),
+      shippingDaysMax: row.variant_shipping_days_max == null ? (row.base_shipping_days_max == null ? null : Number(row.base_shipping_days_max)) : Number(row.variant_shipping_days_max)
     });
   }
 
@@ -874,10 +893,14 @@ async function resolveOrderItems(env, rawItems) {
     throw new Error("No se pueden mezclar monedas distintas en un mismo pedido.");
   }
 
+  const subtotalCents = resolved.reduce((sum, x) => sum + x.unitPriceCents * x.quantity, 0);
+  const shippingCents = subtotalCents >= FREE_SHIPPING_THRESHOLD_CENTS ? 0 : SHIPPING_FLAT_CENTS;
   return {
     items: resolved,
     currency,
-    totalCents: resolved.reduce((sum, x) => sum + x.unitPriceCents * x.quantity, 0)
+    subtotalCents,
+    shippingCents,
+    totalCents: subtotalCents + shippingCents
   };
 }
 
@@ -886,12 +909,12 @@ function orderInsertStatements(env, { orderId, publicCode, customer, cart, payme
     env.DB.prepare(`
       INSERT INTO orders (
         id, public_code, customer_email, customer_name,
-        total_cents, currency, payment_status, fulfillment_status,
+        subtotal_cents, shipping_cents, total_cents, currency, payment_status, fulfillment_status,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     `).bind(
       orderId, publicCode, customer.email, customer.name,
-      cart.totalCents, cart.currency, paymentStatus
+      cart.subtotalCents, cart.shippingCents, cart.totalCents, cart.currency, paymentStatus
     ),
     env.DB.prepare(`
       INSERT INTO order_addresses (
@@ -1000,6 +1023,15 @@ async function createStripeSession(env, origin, customer, cart, orderId, publicC
       [`line_items[${index}][quantity]`, item.quantity]
     );
   });
+  if (cart.shippingCents > 0) {
+    const index = cart.items.length;
+    params.push(
+      [`line_items[${index}][price_data][currency]`, cart.currency.toLowerCase()],
+      [`line_items[${index}][price_data][product_data][name]`, "Envío estándar"],
+      [`line_items[${index}][price_data][unit_amount]`, cart.shippingCents],
+      [`line_items[${index}][quantity]`, 1]
+    );
+  }
 
   return stripeApiPost(env, "/checkout/sessions", params);
 }
@@ -1184,11 +1216,14 @@ function buildOrderEmail(order, type, origin, config) {
   const trackingHref = order.trackingUrl || (site ? `${site}/seguimiento.html` : "");
   const trackingCode = order.trackingCode || "";
 
-  const rows = (order.items || []).map(item => {
+  let rows = (order.items || []).map(item => {
     const variant = item.variantName ? ` <span style="color:#66756e">· ${escapeHtmlEmail(item.variantName)}</span>` : "";
     const lineTotal = Number(item.unitPrice || 0) * Number(item.quantity || 0);
     return `<tr><td style="padding:10px 0;border-bottom:1px solid #e7e2d8"><b>${escapeHtmlEmail(item.productName)}</b>${variant}<br><span style="color:#66756e">${Number(item.quantity || 0)} × ${emailMoney(item.unitPrice, order.currency)}</span></td><td style="padding:10px 0;border-bottom:1px solid #e7e2d8;text-align:right;font-weight:700">${emailMoney(lineTotal, order.currency)}</td></tr>`;
   }).join("");
+  if (Number(order.shipping || 0) > 0) {
+    rows += `<tr><td style="padding:10px 0;border-bottom:1px solid #e7e2d8"><b>Envío estándar</b></td><td style="padding:10px 0;border-bottom:1px solid #e7e2d8;text-align:right;font-weight:700">${emailMoney(order.shipping, order.currency)}</td></tr>`;
+  }
 
   let title = "Pedido confirmado";
   let intro = `Hemos recibido correctamente el pago de tu pedido <b>${safeCode}</b>.`;
@@ -1522,7 +1557,7 @@ async function listAdminOrders(env) {
   const { results } = await env.DB.prepare(`
     SELECT
       o.id, o.public_code, o.customer_email, o.customer_name,
-      o.total_cents, o.currency, o.payment_status, o.fulfillment_status,
+      o.subtotal_cents, o.shipping_cents, o.total_cents, o.currency, o.payment_status, o.fulfillment_status,
       o.tracking_code, o.tracking_url, o.stripe_checkout_session_id,
       o.created_at, o.updated_at,
       a.city, a.province, a.country,
@@ -1538,6 +1573,8 @@ async function listAdminOrders(env) {
     publicCode: row.public_code,
     customerEmail: row.customer_email || "",
     customerName: row.customer_name || "",
+    subtotal: Number(row.subtotal_cents || 0) / 100,
+    shipping: Number(row.shipping_cents || 0) / 100,
     total: Number(row.total_cents || 0) / 100,
     currency: row.currency || "EUR",
     paymentStatus: row.payment_status || "pending",
@@ -1597,6 +1634,8 @@ async function getAdminOrder(env, orderId) {
     publicCode: order.public_code,
     customerEmail: order.customer_email || "",
     customerName: order.customer_name || "",
+    subtotal: Number(order.subtotal_cents || 0) / 100,
+    shipping: Number(order.shipping_cents || 0) / 100,
     total: Number(order.total_cents || 0) / 100,
     currency: order.currency || "EUR",
     paymentStatus: order.payment_status || "pending",
@@ -1952,7 +1991,7 @@ async function handlePublicApi(request, env, url) {
         env.DB.prepare("SELECT COUNT(*) AS total FROM product_variants").first()
       ]);
       return json(
-        { ok: true, database: "connected", products: Number(productRow?.total || 0), variants: Number(variantRow?.total || 0), r2: Boolean(env.PRODUCT_IMAGES), orders: true, stripe: stripeTestConfigured(env), stripeMode: stripeTestConfigured(env) ? "test" : "disabled", email: emailConfig(env).enabled, emailMode: emailModeLabel(env), emailProvider: "resend" },
+        { ok: true, database: "connected", products: Number(productRow?.total || 0), variants: Number(variantRow?.total || 0), r2: Boolean(env.PRODUCT_IMAGES), orders: true, stripe: stripeTestConfigured(env), stripeMode: stripeTestConfigured(env) ? "test" : "disabled", email: emailConfig(env).enabled, emailMode: emailModeLabel(env), emailProvider: "resend", shippingFlat: SHIPPING_FLAT_CENTS / 100, freeShippingThreshold: FREE_SHIPPING_THRESHOLD_CENTS / 100 },
         { headers: { "Cache-Control": "no-store" } }
       );
     } catch (error) {
@@ -1969,11 +2008,14 @@ async function handlePublicApi(request, env, url) {
     try {
       const { results } = await env.DB.prepare(`
         SELECT
-          id, slug, name, short_desc, description, category, tag, emoji,
-          price_cents, currency, stock_mode, stock_qty, image_url
-        FROM products
-        WHERE published = 1
-        ORDER BY sort_order ASC, name ASC
+          p.id, p.slug, p.name, p.short_desc, p.description, p.category, p.tag, p.emoji,
+          p.price_cents, p.currency, p.stock_mode, p.stock_qty, p.image_url,
+          s.warehouse, s.shipping_days_min, s.shipping_days_max
+        FROM products p
+        LEFT JOIN product_sources s
+          ON s.id = (SELECT MIN(s2.id) FROM product_sources s2 WHERE s2.product_id = p.id)
+        WHERE p.published = 1
+        ORDER BY p.sort_order ASC, p.name ASC
       `).all();
       return json(
         { ok: true, products: await attachVariants(env, await attachImages(env, results || [], mapPublicProduct), false) },
