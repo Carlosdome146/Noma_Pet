@@ -1,37 +1,38 @@
-<!doctype html>
+<!DOCTYPE html>
+
 <html lang="es">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Pedido recibido — NÓMA PET</title>
-  <link rel="stylesheet" href="assets/styles.css">
-  <link rel="stylesheet" href="assets/orders.css">
-</head>
+<meta charset="utf-8"/>
+<meta content="width=device-width,initial-scale=1" name="viewport"/>
+<title>Pedido recibido — NÓMA PET</title>
+<link href="assets/styles.css" rel="stylesheet"/>
+<link href="assets/orders.css" rel="stylesheet"/>
+<meta content="Consulta la confirmación y estado inicial de tu pedido NÓMA PET." name="description"/><meta content="#1f4d3b" name="theme-color"/><meta content="noindex,nofollow" name="robots"/><link href="" rel="canonical"/><meta content="website" property="og:type"/><meta content="NÓMA PET" property="og:site_name"/><meta content="es_ES" property="og:locale"/><meta content="Pedido recibido — NÓMA PET" property="og:title"/><meta content="Consulta la confirmación y estado inicial de tu pedido NÓMA PET." property="og:description"/><meta content="" property="og:url"/><meta content="/assets/og-cover.png" property="og:image"/><meta content="summary_large_image" name="twitter:card"/><meta content="Pedido recibido — NÓMA PET" name="twitter:title"/><meta content="Consulta la confirmación y estado inicial de tu pedido NÓMA PET." name="twitter:description"/><meta content="/assets/og-cover.png" name="twitter:image"/><link href="/favicon.svg" rel="icon" type="image/svg+xml"/><link href="/assets/icon-192.png" rel="icon" sizes="192x192" type="image/png"/><link href="/assets/apple-touch-icon.png" rel="apple-touch-icon" sizes="180x180"/><link href="/manifest.webmanifest" rel="manifest"/></head>
 <body>
-  <nav class="nav">
-    <div class="container navin">
-      <a class="brand" href="index.html"><span class="brandmark">N</span>NÓMA PET</a>
-      <div class="links"><a href="tienda.html">Tienda</a><a href="seguimiento.html">Seguimiento</a></div>
-      <div class="actions"><a class="btn primary" href="tienda.html">Seguir comprando</a></div>
-    </div>
-  </nav>
-  <main>
-    <section class="pagehead">
-      <div class="container order-success-wrap">
-        <div class="order-success-icon">✓</div>
-        <span class="eyebrow">Confirmación de pedido</span>
-        <h1>Estamos comprobando el pago.</h1>
-        <p class="lead">El pedido está en D1 y, si vienes de Stripe, el webhook firmado confirmará el pago de forma independiente a esta página.</p>
-        <div id="orderSuccess" class="feature order-status-card">
-          <p>Consultando el pedido…</p>
-        </div>
-        <div class="order-success-actions">
-          <a class="btn primary" href="seguimiento.html">Seguir pedido</a>
-          <a class="btn secondary" href="tienda.html">Volver a tienda</a>
-        </div>
-      </div>
-    </section>
-  </main>
-  <script src="assets/order-success.js"></script>
+<nav class="nav">
+<div class="container navin">
+<a class="brand" href="index.html"><span class="brandmark">N</span>NÓMA PET</a>
+<div class="links"><a href="tienda.html">Tienda</a><a href="seguimiento.html">Seguimiento</a></div>
+<div class="actions"><a class="btn primary" href="tienda.html">Seguir comprando</a></div>
+</div>
+</nav>
+<main>
+<section class="pagehead">
+<div class="container order-success-wrap">
+<div class="order-success-icon">✓</div>
+<span class="eyebrow">Confirmación de pedido</span>
+<h1>Pedido recibido.</h1>
+<p class="lead">Estamos confirmando el pago y preparando la información de tu pedido. Esta página se actualizará automáticamente.</p>
+<div class="feature order-status-card" id="orderSuccess">
+<p>Consultando el pedido…</p>
+</div>
+<div class="order-success-actions">
+<a class="btn primary" href="seguimiento.html">Seguir pedido</a>
+<a class="btn secondary" href="tienda.html">Volver a tienda</a>
+</div>
+</div>
+</section>
+</main>
+<script src="assets/order-success.js"></script>
 </body>
 </html>

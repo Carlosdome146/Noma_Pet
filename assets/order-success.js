@@ -45,7 +45,7 @@ function renderOrder(box, o) {
       <div><span>Estado</span><b>${escS(FULFILLMENT_LABELS[o.fulfillmentStatus] || o.fulfillmentStatus)}</b></div>
       <div><span>Pago</span><b>${escS(PAYMENT_LABELS[o.paymentStatus] || o.paymentStatus)}</b></div>
     </div>
-    ${o.paymentStatus === "pending" ? '<p class="tiny">Stripe ha redirigido correctamente. Estamos esperando la confirmación segura del webhook; suele tardar solo unos instantes.</p>' : ''}`;
+    ${o.paymentStatus === "pending" ? '<p class="tiny">Estamos esperando la confirmación segura del pago; suele tardar solo unos instantes.</p>' : ''}`;
 }
 
 async function initSuccess() {

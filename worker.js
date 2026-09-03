@@ -643,8 +643,8 @@ function makeTestPublicCode() {
   return datedPublicCode("TNP");
 }
 
-function makeStripeTestPublicCode() {
-  return datedPublicCode("SNP");
+function makeStripePublicCode(mode) {
+  return datedPublicCode(mode === "live" ? "NP" : "SNP");
 }
 
 function isTestOrderId(orderId) {
@@ -656,13 +656,17 @@ function isStripeTestOrderId(orderId) {
   return String(orderId || "").startsWith("stripe_test_");
 }
 
-function stripeTestConfigured(env) {
-  return Boolean(
-    typeof env.STRIPE_SECRET_KEY === "string" &&
-    env.STRIPE_SECRET_KEY.startsWith("sk_test_") &&
-    typeof env.STRIPE_WEBHOOK_SECRET === "string" &&
-    env.STRIPE_WEBHOOK_SECRET.startsWith("whsec_")
-  );
+function stripeConfig(env) {
+  const requested = String(env.STRIPE_MODE || "test").trim().toLowerCase();
+  const mode = requested === "live" ? "live" : "test";
+  const secretKey = typeof env.STRIPE_SECRET_KEY === "string" ? env.STRIPE_SECRET_KEY.trim() : "";
+  const webhookSecret = typeof env.STRIPE_WEBHOOK_SECRET === "string" ? env.STRIPE_WEBHOOK_SECRET.trim() : "";
+  const keyOk = mode === "live" ? secretKey.startsWith("sk_live_") : secretKey.startsWith("sk_test_");
+  return { mode, secretKey, webhookSecret, enabled: Boolean(keyOk && webhookSecret.startsWith("whsec_")) };
+}
+
+function stripeConfigured(env) {
+  return stripeConfig(env).enabled;
 }
 
 let catalogSchemaReady = false;
@@ -1047,11 +1051,12 @@ async function cleanupFailedStripeOrder(env, orderId) {
 }
 
 async function createStripeCheckout(request, env, url) {
-  if (!stripeTestConfigured(env)) {
+  const stripe = stripeConfig(env);
+  if (!stripe.enabled) {
     return json({
       ok: false,
-      error: "STRIPE_TEST_NOT_CONFIGURED",
-      message: "Stripe TEST no está completamente configurado. Faltan STRIPE_SECRET_KEY y/o STRIPE_WEBHOOK_SECRET."
+      error: "STRIPE_NOT_CONFIGURED",
+      message: `Stripe ${stripe.mode.toUpperCase()} no está completamente configurado.`
     }, { status: 503, headers: { "Cache-Control": "no-store" } });
   }
 
@@ -1059,8 +1064,9 @@ async function createStripeCheckout(request, env, url) {
   const body = await readJson(request);
   const customer = cleanCustomer(body);
   const cart = await resolveOrderItems(env, body.items);
-  const orderId = `stripe_test_${crypto.randomUUID()}`;
-  const publicCode = makeStripeTestPublicCode();
+  const isLive = stripe.mode === "live";
+  const orderId = `${isLive ? "stripe_live" : "stripe_test"}_${crypto.randomUUID()}`;
+  const publicCode = makeStripePublicCode(stripe.mode);
 
   await env.DB.batch(orderInsertStatements(env, {
     orderId,
@@ -1069,13 +1075,13 @@ async function createStripeCheckout(request, env, url) {
     cart,
     paymentStatus: "pending",
     eventType: "stripe_checkout_requested",
-    eventMessage: "Checkout Stripe TEST solicitado. Pendiente de pago y confirmación por webhook."
+    eventMessage: `Checkout Stripe ${stripe.mode.toUpperCase()} solicitado. Pendiente de confirmación por webhook.`
   }));
 
   try {
     const session = await createStripeSession(env, url.origin, customer, cart, orderId, publicCode);
-    if (!session?.id || !session?.url || session.livemode !== false) {
-      throw new Error("Stripe no devolvió una sesión TEST válida.");
+    if (!session?.id || !session?.url || Boolean(session.livemode) !== isLive) {
+      throw new Error(`Stripe no devolvió una sesión ${stripe.mode.toUpperCase()} válida.`);
     }
 
     await env.DB.batch([
@@ -1087,21 +1093,16 @@ async function createStripeCheckout(request, env, url) {
       env.DB.prepare(`
         INSERT INTO order_events (order_id, event_type, message)
         VALUES (?, 'stripe_session_created', ?)
-      `).bind(orderId, `Sesión Stripe TEST creada: ${session.id}`)
+      `).bind(orderId, `Sesión Stripe ${stripe.mode.toUpperCase()} creada: ${session.id}`)
     ]);
 
     return json({
       ok: true,
       checkoutUrl: session.url,
       order: {
-        id: orderId,
-        publicCode,
-        total: cart.totalCents / 100,
-        currency: cart.currency,
-        paymentStatus: "pending",
-        fulfillmentStatus: "pending",
-        test: true,
-        stripeTest: true
+        id: orderId, publicCode, total: cart.totalCents / 100, currency: cart.currency,
+        paymentStatus: "pending", fulfillmentStatus: "pending",
+        test: !isLive, stripeTest: !isLive
       }
     }, { status: 201, headers: { "Cache-Control": "no-store" } });
   } catch (error) {
@@ -1463,7 +1464,7 @@ async function applyStripeSessionEvent(env, eventType, session, origin = "") {
             stripe_payment_intent_id = COALESCE(?, stripe_payment_intent_id), updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
       `).bind(sessionId, paymentIntentId, orderId).run();
-      await addOrderEvent(env, orderId, "stripe_paid", "Pago confirmado por webhook firmado de Stripe TEST.");
+      await addOrderEvent(env, orderId, "stripe_paid", `Pago confirmado por webhook firmado de Stripe ${stripeConfig(env).mode.toUpperCase()}.`);
       if (previousPaymentStatus !== "paid") {
         await sendOrderEmailSafe(env, orderId, "confirmation", origin);
       }
@@ -1487,7 +1488,7 @@ async function applyStripeSessionEvent(env, eventType, session, origin = "") {
           updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `).bind(orderId).run();
-    await addOrderEvent(env, orderId, "stripe_expired", "La sesión Stripe TEST expiró sin pago confirmado.");
+    await addOrderEvent(env, orderId, "stripe_expired", `La sesión Stripe ${stripeConfig(env).mode.toUpperCase()} expiró sin pago confirmado.`);
     return;
   }
 
@@ -1524,8 +1525,13 @@ async function handleStripeWebhook(request, env) {
   if (!event?.id || !event?.type) {
     return json({ ok: false, error: "INVALID_EVENT" }, { status: 400 });
   }
-  if (event.livemode !== false) {
-    return json({ ok: false, error: "LIVE_EVENT_REJECTED", message: "Esta fase solo acepta eventos Stripe TEST." }, { status: 400 });
+  const stripe = stripeConfig(env);
+  if (!stripe.enabled) {
+    return json({ ok: false, error: "STRIPE_NOT_CONFIGURED" }, { status: 503 });
+  }
+  const expectedLive = stripe.mode === "live";
+  if (Boolean(event.livemode) !== expectedLive) {
+    return json({ ok: false, error: "STRIPE_MODE_MISMATCH", message: `El webhook recibido no corresponde al modo ${stripe.mode.toUpperCase()} configurado.` }, { status: 400 });
   }
 
   await ensureOrderSchema(env);
@@ -1981,6 +1987,157 @@ async function handleAdminApi(request, env, url) {
   return json({ ok: false, error: "NOT_FOUND" }, { status: 404 });
 }
 
+let contactSchemaReady = false;
+async function ensureContactSchema(env) {
+  if (contactSchemaReady) return;
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS contact_messages (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      email TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      message TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      provider_message_id TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `).run();
+  await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_contact_email_created ON contact_messages (email, created_at)`).run();
+  contactSchemaReady = true;
+}
+
+async function publicContact(request, env) {
+  const config = emailConfig(env);
+  if (!config.enabled) return json({ ok:false, error:"EMAIL_NOT_CONFIGURED", message:"El formulario de contacto no está disponible temporalmente." }, { status:503 });
+  const body = await readJson(request);
+  if (cleanText(body.website, 200)) return json({ ok:true });
+  const name = cleanText(body.name, 120);
+  const email = normalizeEmail(body.email);
+  const subject = cleanText(body.subject, 120) || "Contacto web";
+  const message = cleanText(body.message, 3000);
+  if (!name || !email || !email.includes("@") || !message) return json({ ok:false, error:"MISSING_FIELDS", message:"Completa nombre, email y mensaje." }, { status:400 });
+  await ensureContactSchema(env);
+  const recent = await env.DB.prepare(`SELECT COUNT(*) AS total FROM contact_messages WHERE email = ? AND created_at >= datetime('now','-1 hour')`).bind(email).first();
+  if (Number(recent?.total || 0) >= 3) return json({ ok:false, error:"RATE_LIMIT", message:"Has enviado varios mensajes recientemente. Inténtalo de nuevo más tarde." }, { status:429 });
+  const recipient = normalizeEmail(env.CONTACT_TO || "") || (config.mode === "test" ? config.testRecipient : config.replyTo || config.testRecipient);
+  if (!recipient) return json({ ok:false, error:"CONTACT_RECIPIENT_NOT_CONFIGURED", message:"El canal de contacto no está configurado todavía." }, { status:503 });
+  const id = `contact_${crypto.randomUUID()}`;
+  await env.DB.prepare(`INSERT INTO contact_messages (id,name,email,subject,message,status) VALUES (?,?,?,?,?,'pending')`).bind(id,name,email,subject,message).run();
+  const safeName=escapeHtmlEmail(name), safeEmail=escapeHtmlEmail(email), safeSubject=escapeHtmlEmail(subject), safeMessage=escapeHtmlEmail(message).replace(/\n/g,"<br>");
+  const payload={
+    from:config.from,
+    to:[recipient],
+    reply_to:email,
+    subject:`NÓMA PET · ${subject}`,
+    html:`<div style="font-family:Arial,sans-serif;max-width:640px;margin:auto"><h2>Nuevo mensaje desde NÓMA PET</h2><p><b>Nombre:</b> ${safeName}<br><b>Email:</b> ${safeEmail}<br><b>Asunto:</b> ${safeSubject}</p><p>${safeMessage}</p></div>`,
+    text:`Nuevo mensaje desde NÓMA PET\nNombre: ${name}\nEmail: ${email}\nAsunto: ${subject}\n\n${message}`
+  };
+  try {
+    const result=await resendSend(env,payload,`contact/${id}`);
+    await env.DB.prepare(`UPDATE contact_messages SET status='sent', provider_message_id=? WHERE id=?`).bind(cleanText(result?.id,200)||null,id).run();
+    return json({ ok:true });
+  } catch(error) {
+    await env.DB.prepare(`UPDATE contact_messages SET status='failed' WHERE id=?`).bind(id).run();
+    throw error;
+  }
+}
+
+function seoIndexingEnabled(env) {
+  return String(env.SEO_INDEXING_ENABLED || "false").trim().toLowerCase() === "true";
+}
+function xmlEscape(value) { return String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&apos;"}[c])); }
+function absoluteFrom(origin, value) { try { return new URL(value || "/", origin).href; } catch (_) { return origin + "/"; } }
+function productSeoDescription(product) {
+  const raw = cleanText(product?.desc || product?.description || "Accesorios funcionales para mascotas seleccionados por NÓMA PET.", 170);
+  return raw.length > 160 ? `${raw.slice(0,157).trim()}…` : raw;
+}
+async function findPublicProduct(env, identifier, byId=false) {
+  await ensureCatalogSchema(env);
+  const field = byId ? "p.id" : "p.slug";
+  const { results } = await env.DB.prepare(`
+    SELECT p.id,p.slug,p.name,p.short_desc,p.description,p.category,p.tag,p.emoji,p.price_cents,p.currency,p.stock_mode,p.stock_qty,p.image_url,
+           s.warehouse,s.shipping_days_min,s.shipping_days_max
+    FROM products p
+    LEFT JOIN product_sources s ON s.id=(SELECT MIN(s2.id) FROM product_sources s2 WHERE s2.product_id=p.id)
+    WHERE ${field}=? AND p.published=1 LIMIT 1
+  `).bind(identifier).all();
+  if (!(results || []).length) return null;
+  const list = await attachVariants(env, await attachImages(env, results, mapPublicProduct), false);
+  return list[0] || null;
+}
+function productSchema(product, origin, canonical) {
+  const images=(product.images||[]).map(img=>absoluteFrom(origin,img.url));
+  if(!images.length && product.imageUrl) images.push(absoluteFrom(origin,product.imageUrl));
+  const variants=Array.isArray(product.variants)?product.variants:[];
+  const offers=variants.length ? variants.map(v=>({
+    "@type":"Offer", name:v.name, url:canonical, priceCurrency:"EUR", price:Number(v.price||0).toFixed(2),
+    availability:v.stockStatus==="out"?"https://schema.org/OutOfStock":"https://schema.org/InStock",
+    itemCondition:"https://schema.org/NewCondition"
+  })) : [{"@type":"Offer",url:canonical,priceCurrency:product.currency||"EUR",price:Number(product.price||0).toFixed(2),availability:product.stockQty===0&&product.stockMode==="finite"?"https://schema.org/OutOfStock":"https://schema.org/InStock",itemCondition:"https://schema.org/NewCondition"}];
+  return {"@context":"https://schema.org","@type":"Product",name:product.name,description:productSeoDescription(product),image:images,brand:{"@type":"Brand",name:"NÓMA PET"},category:product.cat||"Accesorios para mascotas",offers};
+}
+function applyResponseHeaders(response, env, pathname, forceNoindex=false) {
+  const headers=new Headers(response.headers);
+  headers.set("X-Content-Type-Options","nosniff");
+  headers.set("Referrer-Policy","strict-origin-when-cross-origin");
+  headers.set("Permissions-Policy","camera=(), microphone=(), geolocation=()");
+  headers.set("X-Frame-Options","SAMEORIGIN");
+  const privatePath=forceNoindex || pathname.startsWith("/admin/") || ["/carrito.html","/checkout.html","/pedido-exito.html","/seguimiento.html"].includes(pathname);
+  if (!seoIndexingEnabled(env) || privatePath) headers.set("X-Robots-Tag","noindex, nofollow");
+  return new Response(response.body,{status:response.status,statusText:response.statusText,headers});
+}
+async function renderProductSeo(request, env, url, product) {
+  const assetUrl=new URL("/producto.html",url.origin);
+  const raw=await env.ASSETS.fetch(new Request(assetUrl,{headers:request.headers}));
+  if(!raw.ok) return raw;
+  const canonical=`${url.origin}/producto/${encodeURIComponent(product.slug)}`;
+  const description=productSeoDescription(product);
+  const image=absoluteFrom(url.origin,product.imageUrl||product.images?.[0]?.url||"/assets/og-cover.png");
+  const schema=JSON.stringify(productSchema(product,url.origin,canonical));
+  const response=applyResponseHeaders(raw,env,url.pathname,false);
+  return new HTMLRewriter()
+    .on("title",{element(e){e.setInnerContent(`${product.name} — NÓMA PET`)}})
+    .on('meta[name="description"]',{element(e){e.setAttribute("content",description)}})
+    .on('link[rel="canonical"]',{element(e){e.setAttribute("href",canonical)}})
+    .on('meta[property="og:type"]',{element(e){e.setAttribute("content","product")}})
+    .on('meta[property="og:title"]',{element(e){e.setAttribute("content",`${product.name} — NÓMA PET`)}})
+    .on('meta[property="og:description"]',{element(e){e.setAttribute("content",description)}})
+    .on('meta[property="og:url"]',{element(e){e.setAttribute("content",canonical)}})
+    .on('meta[property="og:image"]',{element(e){e.setAttribute("content",image)}})
+    .on('meta[name="twitter:title"]',{element(e){e.setAttribute("content",`${product.name} — NÓMA PET`)}})
+    .on('meta[name="twitter:description"]',{element(e){e.setAttribute("content",description)}})
+    .on('meta[name="twitter:image"]',{element(e){e.setAttribute("content",image)}})
+    .on('#product-structured-data',{element(e){e.setInnerContent(schema)}})
+    .transform(response);
+}
+async function serveRobots(env, url) {
+  const lines=["User-agent: *","Disallow: /admin/","Disallow: /api/","Disallow: /checkout.html","Disallow: /pedido-exito.html","Disallow: /carrito.html","Disallow: /seguimiento.html",`Sitemap: ${url.origin}/sitemap.xml`];
+  return new Response(lines.join("\n")+"\n",{headers:{"Content-Type":"text/plain; charset=utf-8","Cache-Control":"public, max-age=3600"}});
+}
+async function serveSitemap(env, url) {
+  await ensureCatalogSchema(env);
+  const pages=["/","/tienda.html","/contacto.html","/envios.html","/devoluciones.html","/condiciones.html"];
+  const {results}=await env.DB.prepare(`SELECT slug,updated_at FROM products WHERE published=1 ORDER BY sort_order,name`).all();
+  const urls=pages.map(path=>({loc:url.origin+path,lastmod:""})).concat((results||[]).map(p=>({loc:`${url.origin}/producto/${encodeURIComponent(p.slug)}`,lastmod:String(p.updated_at||"").slice(0,10)})));
+  const body=`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.map(x=>`  <url><loc>${xmlEscape(x.loc)}</loc>${x.lastmod?`<lastmod>${xmlEscape(x.lastmod)}</lastmod>`:""}</url>`).join("\n")}\n</urlset>\n`;
+  return new Response(body,{headers:{"Content-Type":"application/xml; charset=utf-8","Cache-Control":"public, max-age=3600"}});
+}
+async function serveAssetWithSeo(request, env, url) {
+  const raw=await env.ASSETS.fetch(request);
+  const type=raw.headers.get("Content-Type")||"";
+  if(!type.includes("text/html")) return applyResponseHeaders(raw,env,url.pathname,false);
+  const canonicalPath=url.pathname==="/index.html"?"/":url.pathname;
+  const canonical=url.origin+canonicalPath;
+  const image=absoluteFrom(url.origin,"/assets/og-cover.png");
+  const response=applyResponseHeaders(raw,env,url.pathname,false);
+  return new HTMLRewriter()
+    .on('link[rel="canonical"]',{element(e){e.setAttribute("href",canonical)}})
+    .on('meta[property="og:url"]',{element(e){e.setAttribute("content",canonical)}})
+    .on('meta[property="og:image"]',{element(e){e.setAttribute("content",image)}})
+    .on('meta[name="twitter:image"]',{element(e){e.setAttribute("content",image)}})
+    .transform(response);
+}
+
 async function handlePublicApi(request, env, url) {
   await ensureCatalogSchema(env);
   if (url.pathname === "/api/health") {
@@ -1991,7 +2148,7 @@ async function handlePublicApi(request, env, url) {
         env.DB.prepare("SELECT COUNT(*) AS total FROM product_variants").first()
       ]);
       return json(
-        { ok: true, database: "connected", products: Number(productRow?.total || 0), variants: Number(variantRow?.total || 0), r2: Boolean(env.PRODUCT_IMAGES), orders: true, stripe: stripeTestConfigured(env), stripeMode: stripeTestConfigured(env) ? "test" : "disabled", email: emailConfig(env).enabled, emailMode: emailModeLabel(env), emailProvider: "resend", shippingFlat: SHIPPING_FLAT_CENTS / 100, freeShippingThreshold: FREE_SHIPPING_THRESHOLD_CENTS / 100 },
+        { ok: true, database: "connected", products: Number(productRow?.total || 0), variants: Number(variantRow?.total || 0), r2: Boolean(env.PRODUCT_IMAGES), orders: true, stripe: stripeConfigured(env), stripeMode: stripeConfigured(env) ? stripeConfig(env).mode : "disabled", email: emailConfig(env).enabled, emailMode: emailModeLabel(env), emailProvider: "resend", shippingFlat: SHIPPING_FLAT_CENTS / 100, freeShippingThreshold: FREE_SHIPPING_THRESHOLD_CENTS / 100, seoIndexing: seoIndexingEnabled(env) },
         { headers: { "Cache-Control": "no-store" } }
       );
     } catch (error) {
@@ -2030,6 +2187,11 @@ async function handlePublicApi(request, env, url) {
     }
   }
 
+
+  if (url.pathname === "/api/contact" && request.method === "POST") {
+    try { return await publicContact(request, env); }
+    catch (error) { console.error("Contact error:", error); return json({ ok:false, error:"CONTACT_SEND_FAILED", message:"No se pudo enviar el mensaje. Inténtalo de nuevo." }, { status:500 }); }
+  }
 
   if (url.pathname === "/api/checkout/create" && request.method === "POST") {
     try {
@@ -2097,27 +2259,31 @@ async function handleMedia(request, env, url) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-
     try {
-      if (url.pathname.startsWith("/media/")) {
-        return await handleMedia(request, env, url);
-      }
+      if (url.pathname.startsWith("/media/")) return await handleMedia(request, env, url);
+      if (url.pathname.startsWith("/api/admin/")) return await handleAdminApi(request, env, url);
+      if (url.pathname.startsWith("/api/")) return await handlePublicApi(request, env, url);
+      if (url.pathname === "/robots.txt") return await serveRobots(env, url);
+      if (url.pathname === "/sitemap.xml") return await serveSitemap(env, url);
 
-      if (url.pathname.startsWith("/api/admin/")) {
-        return await handleAdminApi(request, env, url);
+      const productPath = url.pathname.match(/^\/producto\/([^/]+)\/?$/);
+      if (productPath && request.method === "GET") {
+        const product = await findPublicProduct(env, decodeURIComponent(productPath[1]), false);
+        if (!product) return new Response("Producto no encontrado", { status:404, headers:{"Content-Type":"text/plain; charset=utf-8"} });
+        return await renderProductSeo(request, env, url, product);
       }
-
-      if (url.pathname.startsWith("/api/")) {
-        return await handlePublicApi(request, env, url);
+      if (url.pathname === "/producto.html" && request.method === "GET") {
+        const legacyId=url.searchParams.get("id");
+        if(legacyId){
+          const product=await findPublicProduct(env,legacyId,true);
+          if(product) return Response.redirect(`${url.origin}/producto/${encodeURIComponent(product.slug)}`,301);
+        }
+        return Response.redirect(`${url.origin}/tienda.html`,302);
       }
-
-      return env.ASSETS.fetch(request);
+      return await serveAssetWithSeo(request, env, url);
     } catch (error) {
       console.error("Worker error:", error);
-      return json(
-        { ok: false, error: "SERVER_ERROR", message: String(error?.message || error) },
-        { status: 500, headers: { "Cache-Control": "no-store" } }
-      );
+      return json({ ok:false, error:"SERVER_ERROR", message:String(error?.message || error) }, { status:500, headers:{"Cache-Control":"no-store"} });
     }
   }
 };

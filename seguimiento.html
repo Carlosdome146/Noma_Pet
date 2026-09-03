@@ -1,45 +1,44 @@
-<!doctype html>
+<!DOCTYPE html>
+
 <html lang="es">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Seguimiento — NÓMA PET</title>
-  <link rel="stylesheet" href="assets/styles.css">
-  <link rel="stylesheet" href="assets/orders.css">
-</head>
+<meta charset="utf-8"/>
+<meta content="width=device-width,initial-scale=1" name="viewport"/>
+<title>Seguimiento de pedido — NÓMA PET</title>
+<link href="assets/styles.css" rel="stylesheet"/>
+<link href="assets/orders.css" rel="stylesheet"/>
+<meta content="Consulta el estado de tu pedido NÓMA PET con tu número de pedido y email." name="description"/><meta content="#1f4d3b" name="theme-color"/><meta content="noindex,nofollow" name="robots"/><link href="" rel="canonical"/><meta content="website" property="og:type"/><meta content="NÓMA PET" property="og:site_name"/><meta content="es_ES" property="og:locale"/><meta content="Seguimiento de pedido — NÓMA PET" property="og:title"/><meta content="Consulta el estado de tu pedido NÓMA PET con tu número de pedido y email." property="og:description"/><meta content="" property="og:url"/><meta content="/assets/og-cover.png" property="og:image"/><meta content="summary_large_image" name="twitter:card"/><meta content="Seguimiento de pedido — NÓMA PET" name="twitter:title"/><meta content="Consulta el estado de tu pedido NÓMA PET con tu número de pedido y email." name="twitter:description"/><meta content="/assets/og-cover.png" name="twitter:image"/><link href="/favicon.svg" rel="icon" type="image/svg+xml"/><link href="/assets/icon-192.png" rel="icon" sizes="192x192" type="image/png"/><link href="/assets/apple-touch-icon.png" rel="apple-touch-icon" sizes="180x180"/><link href="/manifest.webmanifest" rel="manifest"/></head>
 <body>
-  <nav class="nav">
-    <div class="container navin">
-      <a class="brand" href="index.html"><span class="brandmark">N</span>NÓMA PET</a>
-      <div class="links"><a href="tienda.html">Tienda</a><a href="contacto.html">Contacto</a></div>
-      <div class="actions"><a class="btn primary" href="carrito.html">Carrito <span class="cartbadge">0</span></a></div>
-    </div>
-  </nav>
-  <main>
-    <section class="pagehead">
-      <div class="container tracking-wrap">
-        <span class="eyebrow">Después de comprar</span>
-        <h1>Sigue tu pedido.</h1>
-        <p class="lead">Introduce el número de pedido y el mismo email utilizado durante la compra.</p>
-
-        <form class="feature tracking-form" id="trackingForm">
-          <div class="formgrid">
-            <label class="field full">Número de pedido
-              <input id="trackingCode" required placeholder="Ej. TNP-20260814-ABC1234567" autocomplete="off">
-            </label>
-            <label class="field full">Email
-              <input id="trackingEmail" type="email" required placeholder="tu@email.com" autocomplete="email">
-            </label>
-            <div class="field full"><button class="btn primary" type="submit">Consultar estado</button></div>
-          </div>
-          <div id="trackingError" class="form-error" hidden></div>
-        </form>
-
-        <div id="trackingResult" class="feature order-status-card" hidden></div>
-      </div>
-    </section>
-  </main>
-  <script src="assets/app.js"></script>
-  <script src="assets/tracking.js"></script>
+<nav class="nav">
+<div class="container navin">
+<a class="brand" href="index.html"><span class="brandmark">N</span>NÓMA PET</a>
+<div class="links"><a href="tienda.html">Tienda</a><a href="contacto.html">Contacto</a></div>
+<div class="actions"><a class="btn primary" href="carrito.html">Carrito <span class="cartbadge">0</span></a></div>
+</div>
+</nav>
+<main>
+<section class="pagehead">
+<div class="container tracking-wrap">
+<span class="eyebrow">Después de comprar</span>
+<h1>Sigue tu pedido.</h1>
+<p class="lead">Introduce el número de pedido y el mismo email utilizado durante la compra.</p>
+<form class="feature tracking-form" id="trackingForm">
+<div class="formgrid">
+<label class="field full">Número de pedido
+              <input autocomplete="off" id="trackingCode" placeholder="Ej. NP-20260829-ABC1234567" required=""/>
+</label>
+<label class="field full">Email
+              <input autocomplete="email" id="trackingEmail" placeholder="tu@email.com" required="" type="email"/>
+</label>
+<div class="field full"><button class="btn primary" type="submit">Consultar estado</button></div>
+</div>
+<div class="form-error" hidden="" id="trackingError"></div>
+</form>
+<div class="feature order-status-card" hidden="" id="trackingResult"></div>
+</div>
+</section>
+</main>
+<script src="assets/app.js"></script>
+<script src="assets/tracking.js"></script>
 </body>
 </html>

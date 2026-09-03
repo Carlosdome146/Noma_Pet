@@ -9,7 +9,8 @@ const escapeHtml = (s = "") => String(s).replace(/[&<>'"]/g, c => ({ "&":"&amp;"
 let products = [];
 let cartRows = [];
 let isAdminTestMode = false;
-let stripeTestReady = false;
+let stripeReady = false;
+let stripeMode = "disabled";
 let adminToken = "";
 let shippingFlat = 3.90;
 let freeShippingThreshold = 39.90;
@@ -92,13 +93,13 @@ async function submitCheckout(event) {
   event.preventDefault(); setError();
   if(!cartRows.length){setError("El carrito está vacío.");return}
   if(!$("checkoutForm").reportValidity())return;
-  if(!isAdminTestMode&&!stripeTestReady){setError("Stripe TEST todavía no está configurado por completo.");return}
+  if(!isAdminTestMode&&!stripeReady){setError("El pago online todavía no está disponible.");return}
   const button=$("checkoutSubmit"),old=button.textContent; button.disabled=true; button.textContent=isAdminTestMode?"Creando pedido de prueba…":"Abriendo Stripe…";
   try{const payload=formPayload();if(isAdminTestMode)await submitAdminTest(payload);else await submitStripeTest(payload)}catch(error){setError(error.message);button.disabled=false;button.textContent=old}
 }
 
 async function init() {
-  try { const [_, health] = await Promise.all([loadProducts(), loadHealth()]); stripeTestReady=health.stripe===true&&health.stripeMode==="test"; shippingFlat=Number(health.shippingFlat??3.90); freeShippingThreshold=Number(health.freeShippingThreshold??39.90); buildCartRows(); renderSummary(); }
+  try { const [_, health] = await Promise.all([loadProducts(), loadHealth()]); stripeReady=health.stripe===true&&["test","live"].includes(health.stripeMode); stripeMode=health.stripeMode||"disabled"; shippingFlat=Number(health.shippingFlat??3.90); freeShippingThreshold=Number(health.freeShippingThreshold??39.90); buildCartRows(); renderSummary(); }
   catch(error){setError(error.message);return}
   adminToken=sessionStorage.getItem(ADMIN_TOKEN_KEY)||"";
   const params=new URLSearchParams(location.search),requestedAdminTest=params.get("test")==="1",cancelled=params.get("cancel")==="1";
@@ -106,8 +107,21 @@ async function init() {
   if(cancelled)showNotice("<b>Pago cancelado.</b> No se ha cobrado nada y tu carrito sigue intacto.");
   if(isAdminTestMode&&cartRows.length){showNotice("<b>Modo de prueba de administración.</b> Se guardará directamente en D1 y no se abrirá Stripe.");$("checkoutTopbar").textContent="MODO PRUEBA ADMIN · No se cobra dinero";$("checkoutSubmit").disabled=false;$("checkoutSubmit").textContent="Crear pedido de prueba";$("checkoutHelp").textContent="Se guardará en D1 con pago TEST y aparecerá en /admin/pedidos.html."}
   else if(requestedAdminTest&&!adminToken)setError("Para crear un pedido de prueba administrativo, entra primero en /admin/ y vuelve a abrir el checkout desde Pedidos.");
-  else if(stripeTestReady&&cartRows.length){showNotice("<b>Stripe TEST activo.</b> La pantalla de pago será de Stripe, pero ninguna tarjeta real será cobrada.");$("checkoutTopbar").textContent="STRIPE TEST · Pago simulado";$("checkoutSubmit").disabled=false;$("checkoutSubmit").textContent="Pagar con Stripe · TEST";$("checkoutHelp").textContent="Usa una tarjeta de prueba de Stripe. El pedido solo se marcará pagado cuando llegue el webhook firmado."}
-  else if(cartRows.length){setError("Stripe TEST todavía no está listo. Configura STRIPE_SECRET_KEY y STRIPE_WEBHOOK_SECRET en Cloudflare.");$("checkoutSubmit").textContent="Stripe TEST no configurado"}
+  else if(stripeReady&&cartRows.length){
+    $("checkoutSubmit").disabled=false;
+    if(stripeMode==="test"){
+      showNotice("<b>Entorno de pruebas.</b> Stripe está en modo TEST y no se realizará ningún cobro real.");
+      $("checkoutTopbar").hidden=false;
+      $("checkoutTopbar").textContent="ENTORNO DE PRUEBAS · No se cobra dinero real";
+      $("checkoutSubmit").textContent="Pagar con Stripe · TEST";
+      $("checkoutHelp").textContent="Usa exclusivamente una tarjeta de prueba de Stripe.";
+    }else{
+      $("checkoutTopbar").hidden=true;
+      $("checkoutSubmit").textContent="Pagar de forma segura";
+      $("checkoutHelp").textContent="El pago se procesa de forma segura mediante Stripe.";
+    }
+  }
+  else if(cartRows.length){setError("El pago online todavía no está disponible.");$("checkoutSubmit").textContent="Pago no disponible"}
   $("checkoutForm").addEventListener("submit",submitCheckout);
 }
 document.addEventListener("DOMContentLoaded",init);

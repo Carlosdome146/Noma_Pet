@@ -1,89 +1,84 @@
-<!doctype html>
+<!DOCTYPE html>
+
 <html lang="es">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Checkout — NÓMA PET</title>
-  <link rel="stylesheet" href="assets/styles.css">
-  <link rel="stylesheet" href="assets/orders.css">
-</head>
+<meta charset="utf-8"/>
+<meta content="width=device-width,initial-scale=1" name="viewport"/>
+<title>Finalizar compra — NÓMA PET</title>
+<link href="assets/styles.css" rel="stylesheet"/>
+<link href="assets/orders.css" rel="stylesheet"/>
+<meta content="Completa tus datos de entrega y revisa tu pedido antes de pagar de forma segura." name="description"/><meta content="#1f4d3b" name="theme-color"/><meta content="noindex,nofollow" name="robots"/><link href="" rel="canonical"/><meta content="website" property="og:type"/><meta content="NÓMA PET" property="og:site_name"/><meta content="es_ES" property="og:locale"/><meta content="Finalizar compra — NÓMA PET" property="og:title"/><meta content="Completa tus datos de entrega y revisa tu pedido antes de pagar de forma segura." property="og:description"/><meta content="" property="og:url"/><meta content="/assets/og-cover.png" property="og:image"/><meta content="summary_large_image" name="twitter:card"/><meta content="Finalizar compra — NÓMA PET" name="twitter:title"/><meta content="Completa tus datos de entrega y revisa tu pedido antes de pagar de forma segura." name="twitter:description"/><meta content="/assets/og-cover.png" name="twitter:image"/><link href="/favicon.svg" rel="icon" type="image/svg+xml"/><link href="/assets/icon-192.png" rel="icon" sizes="192x192" type="image/png"/><link href="/assets/apple-touch-icon.png" rel="apple-touch-icon" sizes="180x180"/><link href="/manifest.webmanifest" rel="manifest"/></head>
 <body>
-  <div class="topbar" id="checkoutTopbar">STRIPE TEST · No se cobra dinero real</div>
-  <nav class="nav">
-    <div class="container navin">
-      <a class="brand" href="index.html"><span class="brandmark">N</span>NÓMA PET</a>
-      <div class="links">
-        <a href="tienda.html">Tienda</a>
-        <a href="carrito.html">Carrito</a>
-      </div>
-      <div class="actions"><a class="btn secondary" href="carrito.html">← Volver</a></div>
-    </div>
-  </nav>
-
-  <main>
-    <section class="pagehead">
-      <div class="container">
-        <span class="eyebrow">Checkout</span>
-        <h1>Datos de envío.</h1>
-        <p class="lead">Revisa tus datos, los plazos de cada artículo y el total antes de continuar al pago seguro de Stripe.</p>
-
-        <div id="testModeNotice" class="notice order-test-notice" hidden></div>
-
-        <div class="checkout-grid">
-          <form class="checkout-card" id="checkoutForm">
-            <h2>Contacto y entrega</h2>
-            <div class="formgrid">
-              <label class="field full">Nombre y apellidos *
-                <input id="customerName" autocomplete="name" required maxlength="180">
-              </label>
-              <label class="field">Email *
-                <input id="customerEmail" type="email" autocomplete="email" required maxlength="254">
-              </label>
-              <label class="field">Teléfono
-                <input id="customerPhone" type="tel" autocomplete="tel" maxlength="60">
-              </label>
-              <label class="field full">Dirección *
-                <input id="addressLine1" autocomplete="address-line1" required maxlength="240">
-              </label>
-              <label class="field full">Piso, puerta, etc.
-                <input id="addressLine2" autocomplete="address-line2" maxlength="240">
-              </label>
-              <label class="field">Código postal *
-                <input id="postalCode" autocomplete="postal-code" required maxlength="30">
-              </label>
-              <label class="field">Localidad *
-                <input id="city" autocomplete="address-level2" required maxlength="120">
-              </label>
-              <label class="field">Provincia
-                <input id="province" autocomplete="address-level1" maxlength="120">
-              </label>
-              <label class="field">País
+<div class="topbar" hidden="" id="checkoutTopbar"></div>
+<nav class="nav">
+<div class="container navin">
+<a class="brand" href="index.html"><span class="brandmark">N</span>NÓMA PET</a>
+<div class="links">
+<a href="tienda.html">Tienda</a>
+<a href="carrito.html">Carrito</a>
+</div>
+<div class="actions"><a class="btn secondary" href="carrito.html">← Volver</a></div>
+</div>
+</nav>
+<main>
+<section class="pagehead">
+<div class="container">
+<span class="eyebrow">Checkout</span>
+<h1>Datos de envío.</h1>
+<p class="lead">Revisa tus datos, los plazos de cada artículo y el total antes de continuar al pago seguro de Stripe.</p>
+<div class="notice order-test-notice" hidden="" id="testModeNotice"></div>
+<div class="checkout-grid">
+<form class="checkout-card" id="checkoutForm">
+<h2>Contacto y entrega</h2>
+<div class="formgrid">
+<label class="field full">Nombre y apellidos *
+                <input autocomplete="name" id="customerName" maxlength="180" required=""/>
+</label>
+<label class="field">Email *
+                <input autocomplete="email" id="customerEmail" maxlength="254" required="" type="email"/>
+</label>
+<label class="field">Teléfono
+                <input autocomplete="tel" id="customerPhone" maxlength="60" type="tel"/>
+</label>
+<label class="field full">Dirección *
+                <input autocomplete="address-line1" id="addressLine1" maxlength="240" required=""/>
+</label>
+<label class="field full">Piso, puerta, etc.
+                <input autocomplete="address-line2" id="addressLine2" maxlength="240"/>
+</label>
+<label class="field">Código postal *
+                <input autocomplete="postal-code" id="postalCode" maxlength="30" required=""/>
+</label>
+<label class="field">Localidad *
+                <input autocomplete="address-level2" id="city" maxlength="120" required=""/>
+</label>
+<label class="field">Provincia
+                <input autocomplete="address-level1" id="province" maxlength="120"/>
+</label>
+<label class="field">País
                 <select id="country"><option value="ES">España</option></select>
-              </label>
-              <label class="field full">Notas para el pedido
-                <textarea id="orderNotes" rows="3" maxlength="1000" placeholder="Opcional"></textarea>
-              </label>
-            </div>
-
-            <label class="checkout-consent">
-              <input type="checkbox" id="acceptTerms" required>
-              <span>He leído y acepto las <a href="condiciones.html" target="_blank">Condiciones de compra</a>, la <a href="privacidad.html" target="_blank">Política de privacidad</a> y la información sobre <a href="devoluciones.html" target="_blank">devoluciones y desistimiento</a>. Entiendo que confirmar el pedido implica una obligación de pago.</span>
-            </label>
-            <div id="checkoutError" class="form-error" hidden></div>
-            <button id="checkoutSubmit" class="btn primary checkout-submit" type="submit" disabled>Comprobando Stripe…</button>
-            <p class="tiny" id="checkoutHelp">No utilices una tarjeta real. Usaremos tarjetas de prueba de Stripe.</p>
-          </form>
-
-          <aside class="summary checkout-summary">
-            <h3>Tu pedido</h3>
-            <div id="checkoutItems"></div>
-            <div id="checkoutTotals"></div>
-          </aside>
-        </div>
-      </div>
-    </section>
-  </main>
-
-  <script src="assets/checkout.js"></script>
+</label>
+<label class="field full">Notas para el pedido
+                <textarea id="orderNotes" maxlength="1000" placeholder="Opcional" rows="3"></textarea>
+</label>
+</div>
+<label class="checkout-consent">
+<input id="acceptTerms" required="" type="checkbox"/>
+<span>He leído y acepto las <a href="condiciones.html" target="_blank">Condiciones de compra</a>, la <a href="privacidad.html" target="_blank">Política de privacidad</a> y la información sobre <a href="devoluciones.html" target="_blank">devoluciones y desistimiento</a>. Entiendo que confirmar el pedido implica una obligación de pago.</span>
+</label>
+<div class="form-error" hidden="" id="checkoutError"></div>
+<button class="btn primary checkout-submit" disabled="" id="checkoutSubmit" type="submit">Comprobando pago…</button>
+<p class="tiny" id="checkoutHelp">El pago se procesa de forma segura mediante Stripe.</p>
+</form>
+<aside class="summary checkout-summary">
+<h3>Tu pedido</h3>
+<div id="checkoutItems"></div>
+<div id="checkoutTotals"></div>
+</aside>
+</div>
+</div>
+</section>
+</main>
+<script src="assets/checkout.js"></script>
 </body>
 </html>
