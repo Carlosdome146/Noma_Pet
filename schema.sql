@@ -218,3 +218,40 @@ CREATE TABLE IF NOT EXISTS order_emails (
   FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_order_emails_order ON order_emails (order_id, created_at);
+
+
+-- FASE 11 · Fulfillment de proveedor (CJ/QKsource).
+CREATE TABLE IF NOT EXISTS supplier_orders (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id TEXT NOT NULL,
+  provider TEXT NOT NULL DEFAULT 'cj',
+  mode TEXT NOT NULL DEFAULT 'sandbox',
+  origin_country TEXT NOT NULL DEFAULT 'CN',
+  supplier_order_id TEXT,
+  supplier_order_code TEXT,
+  logistic_name TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  sub_status TEXT,
+  tracking_code TEXT,
+  tracking_url TEXT,
+  product_amount_usd REAL,
+  postage_usd REAL,
+  total_usd REAL,
+  error TEXT,
+  last_synced_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS supplier_order_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  supplier_order_local_id INTEGER NOT NULL,
+  order_item_id INTEGER NOT NULL,
+  supplier_sku TEXT,
+  supplier_variant_id TEXT,
+  quantity INTEGER NOT NULL DEFAULT 1,
+  FOREIGN KEY (supplier_order_local_id) REFERENCES supplier_orders(id) ON DELETE CASCADE,
+  FOREIGN KEY (order_item_id) REFERENCES order_items(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_supplier_orders_order ON supplier_orders (order_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_supplier_order_items_parent ON supplier_order_items (supplier_order_local_id);

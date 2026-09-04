@@ -5,7 +5,8 @@
   "keep_vars": true,
   "vars": {
     "STRIPE_MODE": "test",
-    "SEO_INDEXING_ENABLED": "false"
+    "SEO_INDEXING_ENABLED": "false",
+    "CJ_MODE": "sandbox"
   },
   "secrets": {
     "required": [

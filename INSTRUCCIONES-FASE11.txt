@@ -1,0 +1,58 @@
+NÓMA PET · FASE 11 · FULFILLMENT CJ/QKSOURCE SANDBOX
+
+OBJETIVO
+- Un pedido Stripe TEST pagado puede convertirse desde /admin/pedidos.html en un pedido CJ Sandbox.
+- Sandbox NO descuenta saldo, NO genera logística real y NO envía productos.
+- El admin resuelve automáticamente el VID de CJ usando el SKU proveedor guardado en NÓMA PET.
+- Calcula logística CJ, crea el pedido sandbox, permite simular pago/envío y sincroniza tracking/estado.
+
+1. SUBE TODO ESTE REPOSITORIO A GITHUB
+No ejecutes schema.sql. El Worker crea automáticamente supplier_orders y supplier_order_items.
+
+2. CONSIGUE CJ_API_KEY
+En CJ/QKsource:
+- Apps > Install App
+- Instala la app "API" si no está instalada.
+- Ve al apartado API de tu cuenta.
+- Add API > Type: API Key.
+- Copia la API Key.
+
+NO subas esa clave a GitHub.
+
+3. CLOUDFLARE
+Worker noma-pet > Settings > Variables & Secrets > Add Secret
+Nombre: CJ_API_KEY
+Valor: tu API Key de CJ
+
+CJ_MODE ya viene en wrangler.jsonc como "sandbox".
+No lo cambies a live.
+
+4. COMPROBACIÓN
+/api/health debe mostrar:
+"cj": true,
+"cjMode": "sandbox"
+
+5. PRUEBA
+- Haz o abre un pedido Stripe TEST pagado que tenga teléfono.
+- /admin/pedidos.html > abre pedido.
+- Fulfillment proveedor > "Comprobar CJ".
+  Esto valida SKU -> VID y calcula logística.
+- Si es correcto: "Crear pedido CJ Sandbox".
+- Luego "Simular pago CJ".
+- Luego "Simular envío CJ".
+- "Sincronizar CJ" consulta el estado actual.
+
+El sandbox de CJ no cobra ni envía nada real.
+
+IMPORTANTE SOBRE SKU
+Cada línea debe tener Proveedor = QKsource/CJ y SKU proveedor real.
+Si "Comprobar CJ" indica que no encuentra el SKU, no se crea nada: necesitaremos mapear ese SKU al VID de CJ.
+
+TELÉFONO
+Desde esta fase el teléfono es obligatorio en checkout porque CJ lo exige para crear el pedido del proveedor.
+
+SEGURIDAD
+- STRIPE_MODE continúa en test.
+- CJ_MODE continúa en sandbox.
+- CJ_API_KEY es Secret de Cloudflare.
+- No existe pago automático real al proveedor en esta fase.

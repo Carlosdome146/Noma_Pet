@@ -536,3 +536,7 @@ body.modal-open{
 .variant-homologation.rejected{background:#fff0ed;color:#9c3426}
 @media(max-width:900px){.variant-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.variant-grid .field.span2{grid-column:span 2}}
 @media(max-width:560px){.admin-variants-head{align-items:stretch;flex-direction:column}.variant-grid{grid-template-columns:1fr}.variant-grid .field.span2,.variant-grid .field.span4{grid-column:auto}.variant-card-head{align-items:flex-start}.variant-flags{flex-direction:column}}
+
+
+/* FASE 11 · Fulfillment CJ */
+.admin-fulfillment-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}.admin-fulfillment-actions .btn{min-width:150px}.admin-order-box .meta{margin-top:8px;line-height:1.55;word-break:break-word}@media(max-width:640px){.admin-fulfillment-actions{flex-direction:column}.admin-fulfillment-actions .btn{width:100%}}

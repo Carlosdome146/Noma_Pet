@@ -11,6 +11,7 @@ let orderToken = sessionStorage.getItem(ORDER_TOKEN_KEY) || "";
 let orders = [];
 let currentOrder = null;
 let adminSession = null;
+let currentFulfillmentPreview = null;
 
 function setLoginError(message=""){const el=$o("ordersLoginError");el.hidden=!message;el.textContent=message}
 function setFormError(message=""){const el=$o("orderFormError");el.hidden=!message;el.textContent=message}
@@ -42,6 +43,11 @@ function renderEmailStatus(){
   }else{
     el.className="status draft";
     el.textContent="Email sin configurar";
+  }
+  const cj=$o("ordersCjStatus");
+  if(cj){
+    cj.className=adminSession.cj?"status":"status draft";
+    cj.textContent=adminSession.cj?`CJ · ${String(adminSession.cjMode||"sandbox").toUpperCase()}`:"CJ sin configurar";
   }
 }
 
@@ -83,7 +89,7 @@ function renderOrders(){
   });
   $o("ordersRows").innerHTML=filtered.length?filtered.map(o=>`
     <tr>
-      <td><b>${escO(o.publicCode)}</b>${o.stripeTest?'<div class="meta admin-test-order">STRIPE TEST</div>':(o.test?'<div class="meta admin-test-order">PRUEBA ADMIN</div>':"")}<div class="meta">${dtO(o.createdAt)} · ${o.itemCount} línea(s)</div></td>
+      <td><b>${escO(o.publicCode)}</b>${o.stripeTest?'<div class="meta admin-test-order">STRIPE TEST</div>':(o.test?'<div class="meta admin-test-order">PRUEBA ADMIN</div>':"")}${o.supplierOrderCount?`<div class="meta">CJ: ${escO(o.supplierStatuses||"creado")}</div>`:""}<div class="meta">${dtO(o.createdAt)} · ${o.itemCount} línea(s)</div></td>
       <td><b>${escO(o.customerName||"—")}</b><div class="meta">${escO(o.customerEmail||"")}</div></td>
       <td><b>${moneyO(o.total,o.currency)}</b></td>
       <td><span class="status ${o.paymentStatus==="test_paid"?"draft":""}">${escO(P_LABEL[o.paymentStatus]||o.paymentStatus)}</span></td>
@@ -92,7 +98,48 @@ function renderOrders(){
     </tr>`).join(""):`<tr><td colspan="6" class="admin-empty">No hay pedidos que coincidan con el filtro.</td></tr>`;
 }
 
-async function openOrder(id){
+
+function fulfillmentHtml(o){
+  if(!adminSession?.cj){
+    return `<div class="notice"><b>CJ todavía no está conectado.</b><br><span class="meta">Configura CJ_API_KEY en Cloudflare para probar el fulfillment sandbox.</span></div>`;
+  }
+  const supplierOrders=o.supplierOrders||[];
+  if(!supplierOrders.length){
+    const preview=currentFulfillmentPreview;
+    const previewHtml=preview?`<div class="admin-order-events">${(preview.groups||[]).map(g=>`<div class="admin-order-event"><b>${escO(g.originCountry)} → ES · ${escO(g.selectedLogistic?.logisticName||"Sin logística")}</b><span>${g.selectedLogistic?.priceUsd!=null?`$${Number(g.selectedLogistic.priceUsd).toFixed(2)}`:""} ${escO(g.selectedLogistic?.aging||"")}</span><div class="meta">${(g.items||[]).map(i=>`${escO(i.productName)}${i.variantName?` · ${escO(i.variantName)}`:""} · ${escO(i.supplierSku)} → VID ${escO(i.vid)}`).join("<br>")}</div></div>`).join("")}${(preview.incompatible||[]).length?`<div class="notice"><b>Líneas no CJ:</b> ${(preview.incompatible||[]).map(x=>escO(x.productName)).join(", ")}</div>`:""}</div>`:"";
+    return `<div class="notice"><b>Fulfillment CJ ${escO(String(adminSession.cjMode||"sandbox").toUpperCase())}</b><br><span class="meta">Primero validaremos SKU, VID y logística. Crear el pedido en SANDBOX no cobra ni envía nada real.</span></div>${previewHtml}<div class="admin-fulfillment-actions"><button class="btn secondary" type="button" data-fulfillment-action="preview">Comprobar CJ</button><button class="btn primary" type="button" data-fulfillment-action="create">Crear pedido CJ Sandbox</button></div>`;
+  }
+  const cards=supplierOrders.map(so=>`<div class="admin-order-box"><span>CJ ${escO(String(so.mode||"").toUpperCase())} · ${escO(so.originCountry)}</span><b>${escO(so.supplierOrderCode||so.supplierOrderId||"Pedido CJ")}</b><p>Estado: ${escO(so.subStatus||so.status)}<br>Logística: ${escO(so.logisticName||"—")}${so.postageUsd!=null?`<br>Portes CJ: $${Number(so.postageUsd).toFixed(2)}`:""}${so.trackingCode?`<br>Tracking: ${escO(so.trackingCode)}`:""}</p><div class="meta">${(so.items||[]).map(i=>`${escO(i.productName)}${i.variantName?` · ${escO(i.variantName)}`:""}<br>${escO(i.supplierSku)} · VID ${escO(i.supplierVariantId)}`).join("<br>")}</div></div>`).join("");
+  const sandbox=String(adminSession.cjMode||"")==="sandbox";
+  return `<div class="admin-order-grid">${cards}</div><div class="admin-fulfillment-actions"><button class="btn secondary" type="button" data-fulfillment-action="sync">Sincronizar CJ</button>${sandbox?'<button class="btn secondary" type="button" data-fulfillment-action="sandbox-pay">Simular pago CJ</button><button class="btn primary" type="button" data-fulfillment-action="sandbox-ship">Simular envío CJ</button>':""}</div>`;
+}
+
+async function fulfillmentAction(action){
+  if(!currentOrder)return;
+  const buttons=[...document.querySelectorAll("[data-fulfillment-action]")];
+  buttons.forEach(b=>b.disabled=true);setFormError();
+  try{
+    const data=await api(`/api/admin/orders/${encodeURIComponent(currentOrder.id)}/fulfillment/${action}`,{method:"POST",body:JSON.stringify({})});
+    if(action==="preview"){
+      currentFulfillmentPreview=data.preview;
+      flash("CJ validado: SKU, VID y logística disponibles.");
+      await openOrder(currentOrder.id,true);
+    }else{
+      currentFulfillmentPreview=null;
+      currentOrder=data.order||currentOrder;
+      if(action==="create") flash("Pedido CJ Sandbox creado. No se ha cobrado ni enviado nada real.");
+      else if(action==="sandbox-pay") flash("Pago CJ Sandbox simulado. Sin cargo real.");
+      else if(action==="sandbox-ship") flash("Envío CJ Sandbox simulado.");
+      else flash("CJ sincronizado.");
+      await loadOrders();
+      await openOrder(currentOrder.id,true);
+    }
+  }catch(err){setFormError(err.message)}
+  finally{buttons.forEach(b=>b.disabled=false)}
+}
+
+async function openOrder(id,preservePreview=false){
+  if(!preservePreview) currentFulfillmentPreview=null;
   const data=await api(`/api/admin/orders/${encodeURIComponent(id)}`);
   currentOrder=data.order;
   const o=currentOrder;
@@ -125,6 +172,8 @@ async function openOrder(id){
     ${o.address.notes?`<div class="notice"><b>Notas cliente:</b> ${escO(o.address.notes)}</div>`:""}
     <h3 class="admin-section-title">Artículos</h3>
     <div class="admin-order-items">${items}</div>
+    <h3 class="admin-section-title">Fulfillment proveedor</h3>
+    <div id="supplierFulfillment">${fulfillmentHtml(o)}</div>
     <h3 class="admin-section-title">Emails</h3>
     <div class="admin-order-events">${emails||'<div class="meta">Todavía no hay emails registrados para este pedido.</div>'}</div>
     <h3 class="admin-section-title">Historial</h3>
@@ -160,6 +209,11 @@ document.addEventListener("DOMContentLoaded", async()=>{
   $o("ordersRows").addEventListener("click",e=>{
     const btn=e.target.closest("[data-order]");
     if(btn)openOrder(btn.dataset.order).catch(err=>flash(err.message,"error"));
+  });
+
+  $o("orderDetailBody").addEventListener("click",e=>{
+    const btn=e.target.closest("[data-fulfillment-action]");
+    if(btn) fulfillmentAction(btn.dataset.fulfillmentAction);
   });
 
   document.querySelectorAll("[data-close-order]").forEach(el=>el.addEventListener("click",closeOrder));

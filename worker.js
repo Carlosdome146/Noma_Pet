@@ -758,6 +758,44 @@ async function ensureOrderSchema(env) {
         FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
       )
     `),
+    env.DB.prepare(`
+      CREATE TABLE IF NOT EXISTS supplier_orders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_id TEXT NOT NULL,
+        provider TEXT NOT NULL DEFAULT 'cj',
+        mode TEXT NOT NULL DEFAULT 'sandbox',
+        origin_country TEXT NOT NULL DEFAULT 'CN',
+        supplier_order_id TEXT,
+        supplier_order_code TEXT,
+        logistic_name TEXT,
+        status TEXT NOT NULL DEFAULT 'pending',
+        sub_status TEXT,
+        tracking_code TEXT,
+        tracking_url TEXT,
+        product_amount_usd REAL,
+        postage_usd REAL,
+        total_usd REAL,
+        error TEXT,
+        last_synced_at TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
+      )
+    `),
+    env.DB.prepare(`
+      CREATE TABLE IF NOT EXISTS supplier_order_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        supplier_order_local_id INTEGER NOT NULL,
+        order_item_id INTEGER NOT NULL,
+        supplier_sku TEXT,
+        supplier_variant_id TEXT,
+        quantity INTEGER NOT NULL DEFAULT 1,
+        FOREIGN KEY (supplier_order_local_id) REFERENCES supplier_orders(id) ON DELETE CASCADE,
+        FOREIGN KEY (order_item_id) REFERENCES order_items(id) ON DELETE CASCADE
+      )
+    `),
+    env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_supplier_orders_order ON supplier_orders (order_id, created_at)`),
+    env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_supplier_order_items_parent ON supplier_order_items (supplier_order_local_id)`),
     env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_order_emails_order ON order_emails (order_id, created_at)`),
     env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_order_events_order ON order_events (order_id, created_at)`),
     env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_orders_email_code ON orders (customer_email, public_code)`),
@@ -1042,6 +1080,8 @@ async function createStripeSession(env, origin, customer, cart, orderId, publicC
 
 async function cleanupFailedStripeOrder(env, orderId) {
   await env.DB.batch([
+    env.DB.prepare("DELETE FROM supplier_order_items WHERE supplier_order_local_id IN (SELECT id FROM supplier_orders WHERE order_id = ?)").bind(orderId),
+    env.DB.prepare("DELETE FROM supplier_orders WHERE order_id = ?").bind(orderId),
     env.DB.prepare("DELETE FROM order_emails WHERE order_id = ?").bind(orderId),
     env.DB.prepare("DELETE FROM order_events WHERE order_id = ?").bind(orderId),
     env.DB.prepare("DELETE FROM order_items WHERE order_id = ?").bind(orderId),
@@ -1558,6 +1598,355 @@ async function handleStripeWebhook(request, env) {
   return json({ ok: true, received: event.type });
 }
 
+
+let cjTokenCache = { apiKey: "", accessToken: "", expiresAt: 0 };
+
+function cjMode(env) {
+  return cleanText(env.CJ_MODE || "sandbox", 20).toLowerCase() === "live" ? "live" : "sandbox";
+}
+
+function cjConfigured(env) {
+  return cleanText(env.CJ_API_KEY, 400).length > 20;
+}
+
+function isCjSupplier(name) {
+  const n = cleanText(name, 180).toLowerCase();
+  return n.includes("cj") || n.includes("qksource") || n.includes("qk source") || n.includes("dropshipping");
+}
+
+function countryCodeFromWarehouse(value) {
+  const w = cleanText(value, 180).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  if (!w) return "CN";
+  if (w.includes("espana") || w.includes("spain")) return "ES";
+  if (w.includes("china")) return "CN";
+  if (w.includes("germany") || w.includes("alemania")) return "DE";
+  if (w.includes("france") || w.includes("francia")) return "FR";
+  if (w.includes("italy") || w.includes("italia")) return "IT";
+  if (w.includes("poland") || w.includes("polonia")) return "PL";
+  if (w.includes("czech") || w.includes("chequia") || w.includes("republica checa")) return "CZ";
+  if (w.includes("netherlands") || w.includes("paises bajos")) return "NL";
+  if (w.includes("belgium") || w.includes("belgica")) return "BE";
+  if (w.includes("portugal")) return "PT";
+  return "CN";
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function cjAccessToken(env) {
+  if (!cjConfigured(env)) throw new Error("Falta configurar CJ_API_KEY en Cloudflare.");
+  const apiKey = cleanText(env.CJ_API_KEY, 400);
+  const now = Date.now();
+  if (cjTokenCache.apiKey === apiKey && cjTokenCache.accessToken && cjTokenCache.expiresAt > now + 60_000) {
+    return cjTokenCache.accessToken;
+  }
+  const response = await fetch("https://developers.cjdropshipping.com/api2.0/v1/authentication/getAccessToken", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ apiKey })
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data?.result !== true || !data?.data?.accessToken) {
+    throw new Error(`CJ no aceptó la API Key: ${data?.message || response.status}`);
+  }
+  // Cache prudente de 12 horas en el isolate. CJ mantiene tokens de larga duración.
+  cjTokenCache = { apiKey, accessToken: data.data.accessToken, expiresAt: now + 12 * 60 * 60 * 1000 };
+  return cjTokenCache.accessToken;
+}
+
+async function cjRequest(env, path, options = {}) {
+  const token = await cjAccessToken(env);
+  const headers = new Headers(options.headers || {});
+  headers.set("CJ-Access-Token", token);
+  if (options.body != null) headers.set("Content-Type", "application/json");
+  const response = await fetch(`https://developers.cjdropshipping.com/api2.0/v1${path}`, {
+    method: options.method || "GET",
+    headers,
+    body: options.body == null ? undefined : JSON.stringify(options.body)
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data?.result !== true || Number(data?.code || 0) !== 200) {
+    const detail = data?.message || data?.data?.message || `HTTP ${response.status}`;
+    throw new Error(`CJ: ${detail}`);
+  }
+  return data.data;
+}
+
+async function cjResolveVariantBySku(env, sku, countryCode = "") {
+  const cleanSku = cleanText(sku, 180);
+  if (!cleanSku) throw new Error("Falta SKU del proveedor.");
+  const params = new URLSearchParams({ variantSku: cleanSku });
+  if (countryCode) params.set("countryCode", countryCode);
+  const data = await cjRequest(env, `/product/variant/query?${params.toString()}`);
+  const variants = Array.isArray(data) ? data : [];
+  if (!variants.length) throw new Error(`CJ no encuentra el SKU ${cleanSku}.`);
+  const exact = variants.find(v => String(v.variantSku || "").toLowerCase() === cleanSku.toLowerCase()) || variants[0];
+  if (!exact?.vid) throw new Error(`CJ no devolvió VID para ${cleanSku}.`);
+  return {
+    vid: String(exact.vid),
+    variantSku: String(exact.variantSku || cleanSku),
+    variantName: String(exact.variantNameEn || exact.variantName || ""),
+    sellPriceUsd: Number(exact.variantSellPrice || 0)
+  };
+}
+
+function cjFreightTotal(option) {
+  const total = Number(option?.totalPostageFee);
+  if (Number.isFinite(total) && total >= 0) return total;
+  return Number(option?.logisticPrice || 0) + Number(option?.taxesFee || 0) + Number(option?.clearanceOperationFee || 0);
+}
+
+async function cjFreightOptions(env, originCountry, destinationCountry, postalCode, products) {
+  const data = await cjRequest(env, "/logistic/freightCalculate", {
+    method: "POST",
+    body: {
+      startCountryCode: originCountry,
+      endCountryCode: destinationCountry,
+      zip: postalCode || undefined,
+      products: products.map(p => ({ quantity: p.quantity, vid: p.vid }))
+    }
+  });
+  const options = (Array.isArray(data) ? data : [])
+    .map(x => ({
+      logisticName: String(x.logisticName || ""),
+      aging: String(x.logisticAging || ""),
+      priceUsd: cjFreightTotal(x),
+      basePriceUsd: Number(x.logisticPrice || 0),
+      taxesUsd: Number(x.taxesFee || 0),
+      clearanceUsd: Number(x.clearanceOperationFee || 0)
+    }))
+    .filter(x => x.logisticName && Number.isFinite(x.priceUsd))
+    .sort((a, b) => a.priceUsd - b.priceUsd);
+  if (!options.length) throw new Error(`CJ no ofrece logística ${originCountry} → ${destinationCountry} para este pedido.`);
+  return options;
+}
+
+async function buildCjFulfillmentPreview(env, orderId) {
+  if (!cjConfigured(env)) throw new Error("Falta configurar CJ_API_KEY en Cloudflare.");
+  const order = await getAdminOrder(env, orderId);
+  if (!order) throw new Error("Pedido no encontrado.");
+  if (!['paid','test_paid'].includes(order.paymentStatus)) throw new Error("El pedido todavía no figura como pagado.");
+  if (!order.address.phone) throw new Error("CJ exige teléfono del destinatario. Este pedido no tiene teléfono.");
+
+  const compatible = order.items.filter(i => isCjSupplier(i.supplier));
+  const incompatible = order.items.filter(i => !isCjSupplier(i.supplier));
+  if (!compatible.length) throw new Error("Este pedido no contiene líneas asociadas a CJ/QKsource.");
+
+  const resolved = [];
+  for (let index = 0; index < compatible.length; index++) {
+    const item = compatible[index];
+    if (!item.supplierSku) throw new Error(`Falta SKU proveedor en ${item.productName}${item.variantName ? ` · ${item.variantName}` : ''}.`);
+    const originCountry = countryCodeFromWarehouse(item.warehouse);
+    const variant = await cjResolveVariantBySku(env, item.supplierSku, originCountry === 'ES' ? 'ES' : '');
+    resolved.push({
+      orderItemId: item.id,
+      productName: item.productName,
+      variantName: item.variantName || "",
+      supplierSku: item.supplierSku,
+      vid: variant.vid,
+      quantity: item.quantity,
+      originCountry
+    });
+    if (index < compatible.length - 1) await sleep(550);
+  }
+
+  const groupMap = new Map();
+  for (const item of resolved) {
+    if (!groupMap.has(item.originCountry)) groupMap.set(item.originCountry, []);
+    groupMap.get(item.originCountry).push(item);
+  }
+
+  const groups = [];
+  for (const [originCountry, items] of groupMap.entries()) {
+    const logistics = await cjFreightOptions(env, originCountry, order.address.country || 'ES', order.address.postalCode, items);
+    groups.push({ originCountry, items, logistics, selectedLogistic: logistics[0] });
+    if (groups.length < groupMap.size) await sleep(550);
+  }
+
+  return {
+    orderId: order.id,
+    publicCode: order.publicCode,
+    mode: cjMode(env),
+    groups,
+    incompatible: incompatible.map(i => ({ id: i.id, productName: i.productName, supplier: i.supplier || "" }))
+  };
+}
+
+async function createCjSupplierOrders(request, env, orderId) {
+  await ensureOrderSchema(env);
+  const existing = await env.DB.prepare(`SELECT COUNT(*) AS total FROM supplier_orders WHERE order_id = ? AND provider = 'cj'`).bind(orderId).first();
+  if (Number(existing?.total || 0) > 0) {
+    return json({ ok: false, error: "ALREADY_CREATED", message: "Este pedido ya tiene fulfillment CJ creado. Usa Sincronizar." }, { status: 409 });
+  }
+
+  const preview = await buildCjFulfillmentPreview(env, orderId);
+  const order = await getAdminOrder(env, orderId);
+  const mode = cjMode(env);
+  const created = [];
+
+  for (let groupIndex = 0; groupIndex < preview.groups.length; groupIndex++) {
+    const group = preview.groups[groupIndex];
+    const logistic = group.selectedLogistic;
+    const payload = {
+      orderNumber: `${order.publicCode}-${group.originCountry}`.slice(0, 50),
+      shippingZip: order.address.postalCode,
+      shippingCountryCode: order.address.country || "ES",
+      shippingCountry: "Spain",
+      shippingProvince: order.address.province || order.address.city || "Spain",
+      shippingCity: order.address.city,
+      shippingAddress: order.address.line1,
+      shippingAddress2: order.address.line2 || "",
+      shippingCustomerName: order.customerName,
+      shippingPhone: order.address.phone,
+      remark: `NÓMA PET ${order.publicCode}`,
+      fromCountryCode: group.originCountry,
+      logisticName: logistic.logisticName,
+      isSandbox: mode === "sandbox" ? 1 : 0,
+      products: group.items.map(i => ({ vid: i.vid, quantity: i.quantity, shippingName: i.productName.slice(0, 180) }))
+    };
+
+    // Create Order never pays the provider. In sandbox it also never creates real fulfillment.
+    const supplierOrderId = String(await cjRequest(env, "/shopping/order/createOrder", { method: "POST", body: payload }));
+    const local = await env.DB.prepare(`
+      INSERT INTO supplier_orders (
+        order_id, provider, mode, origin_country, supplier_order_id, logistic_name,
+        status, postage_usd, total_usd, last_synced_at
+      ) VALUES (?, 'cj', ?, ?, ?, ?, 'CREATED', ?, ?, CURRENT_TIMESTAMP)
+      RETURNING id
+    `).bind(orderId, mode, group.originCountry, supplierOrderId, logistic.logisticName, logistic.priceUsd, logistic.priceUsd).first();
+
+    const localId = Number(local?.id || 0);
+    if (!localId) throw new Error("No se pudo registrar el pedido de proveedor en D1.");
+    for (const item of group.items) {
+      await env.DB.prepare(`
+        INSERT INTO supplier_order_items (supplier_order_local_id, order_item_id, supplier_sku, supplier_variant_id, quantity)
+        VALUES (?, ?, ?, ?, ?)
+      `).bind(localId, item.orderItemId, item.supplierSku, item.vid, item.quantity).run();
+    }
+    await addOrderEvent(env, orderId, "supplier_order_created", `CJ ${mode.toUpperCase()} creado (${group.originCountry}) · ${supplierOrderId} · ${logistic.logisticName}.`);
+    created.push({ localId, supplierOrderId, originCountry: group.originCountry, logisticName: logistic.logisticName, sandbox: mode === "sandbox" });
+    if (groupIndex < preview.groups.length - 1) await sleep(550);
+  }
+
+  return json({ ok: true, created, order: await getAdminOrder(env, orderId) }, { headers: { "Cache-Control": "no-store" } });
+}
+
+async function syncSingleCjSupplierOrder(env, supplierOrder) {
+  const detail = await cjRequest(env, `/shopping/order/getOrderDetail?orderId=${encodeURIComponent(supplierOrder.supplier_order_id)}`);
+  const status = String(detail?.orderStatus || "OTHER");
+  const subStatus = detail?.subStatus ? String(detail.subStatus) : null;
+  const trackingCode = detail?.trackNumber ? String(detail.trackNumber) : null;
+  const trackingUrl = detail?.trackingUrl ? String(detail.trackingUrl) : null;
+  const totalUsd = detail?.orderAmount == null ? null : Number(detail.orderAmount);
+  const productUsd = detail?.productAmount == null ? null : Number(detail.productAmount);
+  const postageUsd = detail?.postageAmount == null ? null : Number(detail.postageAmount);
+  await env.DB.prepare(`
+    UPDATE supplier_orders
+    SET supplier_order_code = ?, status = ?, sub_status = ?, tracking_code = ?, tracking_url = ?,
+        product_amount_usd = COALESCE(?, product_amount_usd), postage_usd = COALESCE(?, postage_usd),
+        total_usd = COALESCE(?, total_usd), error = NULL, last_synced_at = CURRENT_TIMESTAMP,
+        updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `).bind(detail?.cjOrderCode || detail?.orderNum || null, status, subStatus, trackingCode, trackingUrl, productUsd, postageUsd, totalUsd, supplierOrder.id).run();
+  return { ...detail, orderStatus: status, subStatus, trackNumber: trackingCode, trackingUrl };
+}
+
+async function reconcileCustomerOrderFromSupplier(env, orderId, origin = "") {
+  const { results } = await env.DB.prepare(`SELECT status, sub_status, tracking_code, tracking_url FROM supplier_orders WHERE order_id = ?`).bind(orderId).all();
+  const rows = results || [];
+  if (!rows.length) return;
+  const effective = rows.map(r => String(r.sub_status || r.status || "").toUpperCase());
+  let fulfillment = null;
+  if (effective.every(s => ["DELIVERED", "COMPLETED", "CLOSED"].includes(s))) fulfillment = "delivered";
+  else if (effective.every(s => ["SHIPPED", "DELIVERED", "COMPLETED", "CLOSED"].includes(s))) fulfillment = "shipped";
+  else if (effective.some(s => ["PENDING", "PROCESSING", "UNSHIPPED", "SHIPPED", "DELIVERED", "COMPLETED"].includes(s))) fulfillment = "processing";
+  if (!fulfillment) return;
+
+  const trackRows = rows.filter(r => r.tracking_code);
+  const oneTrack = rows.length === 1 && trackRows.length === 1 ? trackRows[0] : null;
+  const before = await env.DB.prepare(`SELECT fulfillment_status FROM orders WHERE id = ? LIMIT 1`).bind(orderId).first();
+  await env.DB.prepare(`
+    UPDATE orders
+    SET fulfillment_status = ?,
+        tracking_code = CASE WHEN ? IS NOT NULL THEN ? ELSE tracking_code END,
+        tracking_url = CASE WHEN ? IS NOT NULL THEN ? ELSE tracking_url END,
+        updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `).bind(fulfillment, oneTrack?.tracking_code || null, oneTrack?.tracking_code || null, oneTrack?.tracking_url || null, oneTrack?.tracking_url || null, orderId).run();
+  if (origin && before?.fulfillment_status !== fulfillment) {
+    if (fulfillment === "shipped") await sendOrderEmailSafe(env, orderId, "shipped", origin);
+    else if (fulfillment === "delivered") await sendOrderEmailSafe(env, orderId, "delivered", origin);
+  }
+}
+
+async function syncCjSupplierOrders(env, orderId, origin = "") {
+  await ensureOrderSchema(env);
+  const { results } = await env.DB.prepare(`SELECT * FROM supplier_orders WHERE order_id = ? AND provider = 'cj' ORDER BY id`).bind(orderId).all();
+  if (!(results || []).length) return json({ ok: false, error: "NO_SUPPLIER_ORDER", message: "Todavía no hay pedidos CJ para sincronizar." }, { status: 404 });
+  const synced = [];
+  for (let i = 0; i < results.length; i++) {
+    synced.push(await syncSingleCjSupplierOrder(env, results[i]));
+    if (i < results.length - 1) await sleep(550);
+  }
+  await reconcileCustomerOrderFromSupplier(env, orderId, origin);
+  await addOrderEvent(env, orderId, "supplier_sync", "Estados de CJ sincronizados.");
+  return json({ ok: true, synced, order: await getAdminOrder(env, orderId) }, { headers: { "Cache-Control": "no-store" } });
+}
+
+async function sandboxPayCjSupplierOrders(env, orderId, origin = "") {
+  if (cjMode(env) !== "sandbox") return json({ ok: false, error: "SANDBOX_ONLY", message: "Esta acción solo está disponible en CJ_MODE=sandbox." }, { status: 403 });
+  const { results } = await env.DB.prepare(`SELECT * FROM supplier_orders WHERE order_id = ? AND provider='cj' ORDER BY id`).bind(orderId).all();
+  if (!(results || []).length) return json({ ok: false, error: "NO_SUPPLIER_ORDER", message: "Crea primero el pedido CJ Sandbox." }, { status: 404 });
+  for (let i = 0; i < results.length; i++) {
+    const row = results[i];
+    const detail = await cjRequest(env, `/shopping/order/getOrderDetail?orderId=${encodeURIComponent(row.supplier_order_id)}`);
+    const current = String(detail?.subStatus || detail?.orderStatus || "").toUpperCase();
+    if (["CREATED", "IN_CART"].includes(current)) {
+      await cjRequest(env, "/shopping/order/confirmOrder", { method: "PATCH", body: { orderId: row.supplier_order_id } });
+      await sleep(550);
+    }
+    const afterConfirm = await cjRequest(env, `/shopping/order/getOrderDetail?orderId=${encodeURIComponent(row.supplier_order_id)}`);
+    const statusNow = String(afterConfirm?.subStatus || afterConfirm?.orderStatus || "").toUpperCase();
+    if (["UNPAID", "CREATED", "IN_CART"].includes(statusNow)) {
+      await cjRequest(env, "/shopping/sandbox/simulatePay", { method: "POST", body: { orderId: row.supplier_order_id } });
+    }
+    if (i < results.length - 1) await sleep(550);
+  }
+  await addOrderEvent(env, orderId, "supplier_sandbox_paid", "Pago CJ Sandbox simulado. No se ha descontado saldo real.");
+  return syncCjSupplierOrders(env, orderId, origin);
+}
+
+async function sandboxShipCjSupplierOrders(env, orderId, origin = "") {
+  if (cjMode(env) !== "sandbox") return json({ ok: false, error: "SANDBOX_ONLY", message: "Esta acción solo está disponible en CJ_MODE=sandbox." }, { status: 403 });
+  const { results } = await env.DB.prepare(`SELECT * FROM supplier_orders WHERE order_id = ? AND provider='cj' ORDER BY id`).bind(orderId).all();
+  if (!(results || []).length) return json({ ok: false, error: "NO_SUPPLIER_ORDER", message: "Crea primero el pedido CJ Sandbox." }, { status: 404 });
+  for (let i = 0; i < results.length; i++) {
+    const row = results[i];
+    const detail = await cjRequest(env, `/shopping/order/getOrderDetail?orderId=${encodeURIComponent(row.supplier_order_id)}`);
+    const current = String(detail?.subStatus || detail?.orderStatus || "").toUpperCase();
+    if (["CREATED", "IN_CART", "UNPAID"].includes(current)) {
+      throw new Error("El pedido CJ Sandbox todavía no está pagado. Pulsa primero “Simular pago CJ”.");
+    }
+    if (current === "PENDING" || current === "UNSHIPPED") {
+      await cjRequest(env, "/shopping/sandbox/updateStatus", { method: "POST", body: { orderId: row.supplier_order_id, targetStatus: 400 } });
+      await sleep(550);
+    }
+    const afterProcessing = await cjRequest(env, `/shopping/order/getOrderDetail?orderId=${encodeURIComponent(row.supplier_order_id)}`);
+    const state2 = String(afterProcessing?.subStatus || afterProcessing?.orderStatus || "").toUpperCase();
+    if (state2 === "PROCESSING" || state2 === "UNSHIPPED") {
+      await cjRequest(env, "/shopping/sandbox/updateStatus", { method: "POST", body: { orderId: row.supplier_order_id, targetStatus: 500 } });
+      await sleep(550);
+    }
+    const fakeTrack = `NOMA-SBX-${String(row.supplier_order_id).slice(-10)}`.slice(0, 64);
+    await cjRequest(env, "/shopping/sandbox/updateTrackNumber", { method: "POST", body: { orderId: row.supplier_order_id, trackNumber: fakeTrack } });
+    if (i < results.length - 1) await sleep(550);
+  }
+  await addOrderEvent(env, orderId, "supplier_sandbox_shipped", "Envío CJ Sandbox simulado con tracking ficticio.");
+  const response = await syncCjSupplierOrders(env, orderId, origin);
+  return response;
+}
+
 async function listAdminOrders(env) {
   await ensureOrderSchema(env);
   const { results } = await env.DB.prepare(`
@@ -1567,7 +1956,9 @@ async function listAdminOrders(env) {
       o.tracking_code, o.tracking_url, o.stripe_checkout_session_id,
       o.created_at, o.updated_at,
       a.city, a.province, a.country,
-      (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.id) AS item_count
+      (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.id) AS item_count,
+      (SELECT COUNT(*) FROM supplier_orders so WHERE so.order_id = o.id) AS supplier_order_count,
+      (SELECT GROUP_CONCAT(DISTINCT COALESCE(so.sub_status, so.status)) FROM supplier_orders so WHERE so.order_id = o.id) AS supplier_statuses
     FROM orders o
     LEFT JOIN order_addresses a ON a.order_id = o.id
     ORDER BY o.created_at DESC
@@ -1593,6 +1984,8 @@ async function listAdminOrders(env) {
     province: row.province || "",
     country: row.country || "ES",
     itemCount: Number(row.item_count || 0),
+    supplierOrderCount: Number(row.supplier_order_count || 0),
+    supplierStatuses: row.supplier_statuses || "",
     test: isTestOrderId(row.id),
     stripeTest: isStripeTestOrderId(row.id) && Boolean(row.stripe_checkout_session_id)
   }));
@@ -1613,13 +2006,16 @@ async function getAdminOrder(env, orderId) {
 
   if (!order) return null;
 
-  const [itemsResult, eventsResult, emailsResult] = await env.DB.batch([
+  const [itemsResult, eventsResult, emailsResult, supplierOrdersResult, supplierItemsResult] = await env.DB.batch([
     env.DB.prepare(`
-      SELECT id, product_id, product_name, variant_id, variant_name, quantity, unit_price_cents,
-             supplier, supplier_sku
-      FROM order_items
-      WHERE order_id = ?
-      ORDER BY id ASC
+      SELECT oi.id, oi.product_id, oi.product_name, oi.variant_id, oi.variant_name, oi.quantity, oi.unit_price_cents,
+             oi.supplier, oi.supplier_sku,
+             COALESCE(v.warehouse, s.warehouse, '') AS warehouse
+      FROM order_items oi
+      LEFT JOIN product_variants v ON v.id = oi.variant_id
+      LEFT JOIN product_sources s ON s.id = (SELECT MIN(s2.id) FROM product_sources s2 WHERE s2.product_id = oi.product_id)
+      WHERE oi.order_id = ?
+      ORDER BY oi.id ASC
     `).bind(orderId),
     env.DB.prepare(`
       SELECT id, event_type, message, created_at
@@ -1632,6 +2028,19 @@ async function getAdminOrder(env, orderId) {
       FROM order_emails
       WHERE order_id = ?
       ORDER BY created_at DESC, id DESC
+    `).bind(orderId),
+    env.DB.prepare(`
+      SELECT * FROM supplier_orders
+      WHERE order_id = ?
+      ORDER BY id ASC
+    `).bind(orderId),
+    env.DB.prepare(`
+      SELECT soi.*, oi.product_name, oi.variant_name
+      FROM supplier_order_items soi
+      JOIN order_items oi ON oi.id = soi.order_item_id
+      JOIN supplier_orders so ON so.id = soi.supplier_order_local_id
+      WHERE so.order_id = ?
+      ORDER BY soi.id ASC
     `).bind(orderId)
   ]);
 
@@ -1673,7 +2082,8 @@ async function getAdminOrder(env, orderId) {
       quantity: Number(item.quantity || 0),
       unitPrice: Number(item.unit_price_cents || 0) / 100,
       supplier: item.supplier || "",
-      supplierSku: item.supplier_sku || ""
+      supplierSku: item.supplier_sku || "",
+      warehouse: item.warehouse || ""
     })),
     events: (eventsResult.results || []).map(event => ({
       id: Number(event.id),
@@ -1691,6 +2101,33 @@ async function getAdminOrder(env, orderId) {
       error: email.error || "",
       createdAt: email.created_at,
       updatedAt: email.updated_at
+    })),
+    supplierOrders: (supplierOrdersResult.results || []).map(so => ({
+      id: Number(so.id),
+      provider: so.provider || "cj",
+      mode: so.mode || "sandbox",
+      originCountry: so.origin_country || "",
+      supplierOrderId: so.supplier_order_id || "",
+      supplierOrderCode: so.supplier_order_code || "",
+      logisticName: so.logistic_name || "",
+      status: so.status || "pending",
+      subStatus: so.sub_status || "",
+      trackingCode: so.tracking_code || "",
+      trackingUrl: so.tracking_url || "",
+      productAmountUsd: so.product_amount_usd == null ? null : Number(so.product_amount_usd),
+      postageUsd: so.postage_usd == null ? null : Number(so.postage_usd),
+      totalUsd: so.total_usd == null ? null : Number(so.total_usd),
+      error: so.error || "",
+      lastSyncedAt: so.last_synced_at || "",
+      createdAt: so.created_at,
+      items: (supplierItemsResult.results || []).filter(x => Number(x.supplier_order_local_id) === Number(so.id)).map(x => ({
+        orderItemId: Number(x.order_item_id),
+        productName: x.product_name || "",
+        variantName: x.variant_name || "",
+        supplierSku: x.supplier_sku || "",
+        supplierVariantId: x.supplier_variant_id || "",
+        quantity: Number(x.quantity || 0)
+      }))
     }))
   };
 }
@@ -1852,7 +2289,7 @@ async function handleAdminApi(request, env, url) {
 
   if (url.pathname === "/api/admin/session" && request.method === "GET") {
     const mail = emailConfig(env);
-    return json({ ok: true, r2: Boolean(env.PRODUCT_IMAGES), email: mail.enabled, emailMode: mail.mode, emailProvider: mail.provider }, { headers: { "Cache-Control": "no-store" } });
+    return json({ ok: true, r2: Boolean(env.PRODUCT_IMAGES), email: mail.enabled, emailMode: mail.mode, emailProvider: mail.provider, cj: cjConfigured(env), cjMode: cjMode(env) }, { headers: { "Cache-Control": "no-store" } });
   }
 
   if (url.pathname === "/api/admin/orders/test" && request.method === "POST") {
@@ -1866,6 +2303,22 @@ async function handleAdminApi(request, env, url) {
   const orderEmailMatch = url.pathname.match(/^\/api\/admin\/orders\/([^/]+)\/email$/);
   if (orderEmailMatch && request.method === "POST") {
     return resendAdminOrderEmail(request, env, decodeURIComponent(orderEmailMatch[1]));
+  }
+
+  const fulfillmentMatch = url.pathname.match(/^\/api\/admin\/orders\/([^/]+)\/fulfillment\/(preview|create|sync|sandbox-pay|sandbox-ship)$/);
+  if (fulfillmentMatch && request.method === "POST") {
+    const orderId = decodeURIComponent(fulfillmentMatch[1]);
+    const action = fulfillmentMatch[2];
+    try {
+      if (action === "preview") return json({ ok: true, preview: await buildCjFulfillmentPreview(env, orderId) }, { headers: { "Cache-Control": "no-store" } });
+      if (action === "create") return createCjSupplierOrders(request, env, orderId);
+      if (action === "sync") return syncCjSupplierOrders(env, orderId, new URL(request.url).origin);
+      if (action === "sandbox-pay") return sandboxPayCjSupplierOrders(env, orderId, new URL(request.url).origin);
+      if (action === "sandbox-ship") return sandboxShipCjSupplierOrders(env, orderId, new URL(request.url).origin);
+    } catch (error) {
+      console.error("CJ fulfillment error:", error);
+      return json({ ok: false, error: "CJ_FULFILLMENT_ERROR", message: String(error?.message || error) }, { status: 400, headers: { "Cache-Control": "no-store" } });
+    }
   }
 
   const orderMatch = url.pathname.match(/^\/api\/admin\/orders\/([^/]+)$/);
@@ -2148,7 +2601,7 @@ async function handlePublicApi(request, env, url) {
         env.DB.prepare("SELECT COUNT(*) AS total FROM product_variants").first()
       ]);
       return json(
-        { ok: true, database: "connected", products: Number(productRow?.total || 0), variants: Number(variantRow?.total || 0), r2: Boolean(env.PRODUCT_IMAGES), orders: true, stripe: stripeConfigured(env), stripeMode: stripeConfigured(env) ? stripeConfig(env).mode : "disabled", email: emailConfig(env).enabled, emailMode: emailModeLabel(env), emailProvider: "resend", shippingFlat: SHIPPING_FLAT_CENTS / 100, freeShippingThreshold: FREE_SHIPPING_THRESHOLD_CENTS / 100, seoIndexing: seoIndexingEnabled(env) },
+        { ok: true, database: "connected", products: Number(productRow?.total || 0), variants: Number(variantRow?.total || 0), r2: Boolean(env.PRODUCT_IMAGES), orders: true, stripe: stripeConfigured(env), stripeMode: stripeConfigured(env) ? stripeConfig(env).mode : "disabled", email: emailConfig(env).enabled, emailMode: emailModeLabel(env), emailProvider: "resend", cj: cjConfigured(env), cjMode: cjMode(env), shippingFlat: SHIPPING_FLAT_CENTS / 100, freeShippingThreshold: FREE_SHIPPING_THRESHOLD_CENTS / 100, seoIndexing: seoIndexingEnabled(env) },
         { headers: { "Cache-Control": "no-store" } }
       );
     } catch (error) {
