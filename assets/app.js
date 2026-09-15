@@ -116,4 +116,4 @@ function removeItem(key){saveCart(cart().filter(x=>cartItemKey(x)!==key));render
 
 function adminRows(){const tb=document.getElementById('adminRows');if(!tb)return;tb.innerHTML=PRODUCTS.map(p=>`<tr><td>${p.emoji||'🐾'} ${escapeHtml(p.name)}</td><td>${escapeHtml(p.cat)}</td><td>${productPriceHtml(p)}</td><td><span class="status">Publicado</span></td><td></td></tr>`).join('')}
 
-document.addEventListener('DOMContentLoaded',async()=>{await loadProducts();syncBadge();renderProducts();renderProducts('featured',4);initFilters();renderDetail();renderCart();adminRows()});
+document.addEventListener('DOMContentLoaded',async()=>{await loadProducts();syncBadge();renderProducts();renderProducts('featured',6);initFilters();renderDetail();renderCart();adminRows()});
