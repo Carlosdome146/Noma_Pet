@@ -125,41 +125,47 @@ CREATE TABLE IF NOT EXISTS order_items (
 CREATE INDEX IF NOT EXISTS idx_order_items_order ON order_items (order_id);
 
 -- Semilla de la demo actual. Luego sustituiremos estos registros por los SKU homologados.
+-- Semilla de productos ganadores de alta rentabilidad (NÓMA PET)
 INSERT OR IGNORE INTO products
 (id, slug, name, short_desc, description, category, tag, emoji, price_cents, published, sort_order)
 VALUES
-('roller','rodillo-reutilizable-quitapelos','Rodillo reutilizable quitapelos','Recoge pelo de sofás, ropa y asientos sin recambios adhesivos.','Recoge pelo de sofás, ropa y asientos sin recambios adhesivos.','limpieza','TOP','🧹',2290,1,10),
-('bottle','botella-3-en-1-paseo','Botella 3 en 1 de paseo','Agua, bebedero y espacio auxiliar en un formato compacto.','Agua, bebedero y espacio auxiliar en un formato compacto.','paseo','PASEO','💧',2190,1,20),
-('slow','comedero-lento','Comedero lento','Diseño laberinto para alargar el tiempo de comida de forma sencilla.','Diseño laberinto para alargar el tiempo de comida de forma sencilla.','hogar','DIARIO','🥣',1890,1,30),
-('hammock','protector-asiento-hamaca','Protector de asiento tipo hamaca','Protección impermeable para el asiento trasero, fácil de colocar y limpiar.','Protección impermeable para el asiento trasero, fácil de colocar y limpiar.','viaje','VIAJE','🚗',4990,1,40),
-('glove','guante-cepillado','Guante de cepillado','Cepillado cómodo para retirar pelo suelto durante el cuidado diario.','Cepillado cómodo para retirar pelo suelto durante el cuidado diario.','limpieza','CUIDADO','🧤',1490,1,50),
-('bags','kit-bolsas-dispensador','Kit paseo bolsas + dispensador','Un básico ligero y recurrente para los paseos de cada día.','Un básico ligero y recurrente para los paseos de cada día.','paseo','RECURRENTE','♻️',1290,1,60);
+('cama_calmante','cama-calmante-antiansiedad','Cama calmante antiansiedad ''Donut''','Borde elevado y felpa ultrasuave para aliviar el estrés y mejorar el descanso de perros y gatos.','Diseño envolvente con borde elevado que aporta sensación de protección y reduce la ansiedad por separación. Relleno ergonómico de alta densidad y tejido de felpa ultrasuave lavable en lavadora.','hogar','TOP VENTAS','🛏️',3490,1,10),
+('cepillo_vapor','cepillo-aseo-nanovapor-3-en-1','Cepillo de aseo a nanovapor 3 en 1','Elimina el 99% del pelo muerto con tecnología de vapor suave sin tirones ni electricidad estática.','La solución definitiva contra el exceso de pelo en casa. Su difusor de nanovapor atrapa el pelo suelto mientras desenreda y masajea la piel de tu mascota. Batería recargable USB.','limpieza','VIRAL TIKTOK','💨',2190,1,20),
+('arnes_antitirones','arnes-antitirones-ergonomico-reflectante','Arnés antitirones ergonómico reflectante','Distribuye la presión en el torso sin dañar el cuello. Costuras reflectantes y asa de agarre rápido.','Evita ahogos y lesiones en el cuello gracias a su diseño ergonómico que reparte la fuerza de tracción sobre el pecho. Equipado con anilla frontal antitirones y bandas reflectantes.','paseo','RECOMENDADO','🐕',2690,1,30),
+('pelota_inteligente','pelota-interactiva-inteligente-led','Pelota interactiva inteligente con sensor y LED','Giro 360° autónomo con sensor de obstáculos para mantener a tu mascota activa y entretenida.','Juguete interactivo con sensor de movimiento inteligente que esquiva paredes y obstáculos de forma autónoma. Silicona suave no tóxica y recarga rápida mediante USB-C.','juguetes','DIVERSIÓN','🎾',1990,1,40),
+('hammock','protector-asiento-hamaca','Protector de asiento tipo hamaca para coche','Capa impermeable 600D resistente a arañazos, pelo y suciedad con ventana de rejilla transpirable.','Mantén la tapicería de tu vehículo intacta durante cualquier viaje. Fabricado con tela Oxford impermeable y antideslizante, con solapas laterales protectoras y ventana de malla.','viaje','VIAJE TOP','🚗',4490,1,50),
+('bottle','botella-3-en-1-paseo','Botella de paseo portátil 3 en 1','Bebedero hermético de 500ml, contenedor de snacks y dispensador de bolsas en un solo dispositivo.','El todo en uno imprescindible para paseos y excursiones. Con botón dosificador de flujo y bloqueo antifugas que permite recuperar el agua no consumida. Incluye dispensador de bolsas.','paseo','ESENCIAL','💧',2290,1,60);
 
--- Candidatos de sourcing encontrados. NO están homologados: falta validar stock UE, transporte a España y documentación.
+-- Proveedores y costes homologados (CJ Dropshipping)
 INSERT INTO product_sources
-(product_id, supplier, supplier_sku, supplier_url, product_cost_cents, cost_currency, warehouse, stock_status, compliance_status, notes, checked_at)
-SELECT 'roller','CJdropshipping','CJJT174982701AZ','https://cjdropshipping.com/product/portable-washable-hair-remover-with-adhesive-roller-p-1653949161269637120.html',263,'USD',NULL,'unknown','pending','Precio de producto visible; transporte/stock UE pendientes de validar.','2026-08-14'
-WHERE NOT EXISTS (SELECT 1 FROM product_sources WHERE supplier='CJdropshipping' AND supplier_sku='CJJT174982701AZ');
-
-INSERT INTO product_sources
-(product_id, supplier, supplier_sku, supplier_url, product_cost_cents, cost_currency, warehouse, stock_status, compliance_status, notes, checked_at)
-SELECT 'bottle','CJdropshipping','CJJT171012401AZ','https://cjdropshipping.com/product/800ml-dogs-water-bottle-portable-high-capacity-leakproof-pet-foldable-drinking-bowl-golden-retriever-outdoor-walking-supplies-pet-products-p-1637037130746703872.html',399,'USD',NULL,'unknown','pending','Precio de producto visible; transporte/stock UE pendientes de validar.','2026-08-14'
-WHERE NOT EXISTS (SELECT 1 FROM product_sources WHERE supplier='CJdropshipping' AND supplier_sku='CJJT171012401AZ');
+(product_id, supplier, supplier_sku, supplier_url, product_cost_cents, shipping_cost_cents, cost_currency, warehouse, stock_status, shipping_days_min, shipping_days_max, compliance_status, notes, checked_at)
+SELECT 'cama_calmante','CJdropshipping','CJGY112879401AZ','https://cjdropshipping.com',680,590,'EUR','Almacén CJ Europa / Central','in_stock',8,12,'approved','Embalaje comprimido al vacío para optimizar transporte.','2026-09-15'
+WHERE NOT EXISTS (SELECT 1 FROM product_sources WHERE product_id='cama_calmante');
 
 INSERT INTO product_sources
-(product_id, supplier, supplier_sku, supplier_url, product_cost_cents, cost_currency, warehouse, stock_status, compliance_status, notes, checked_at)
-SELECT 'slow','CJdropshipping','CJGY174846501AZ','https://cjdropshipping.com/product/pet-dog-cat-slow-feeder-bowls-anti-choking-slow-feeder-dish-bowl-home-dog-eating-plate-anti-gulping-bowl-supplies-p-1653041912300969984.html',129,'USD',NULL,'unknown','pending','Rango visible $1.29–2.11; se registra el mínimo solo como referencia.','2026-08-14'
-WHERE NOT EXISTS (SELECT 1 FROM product_sources WHERE supplier='CJdropshipping' AND supplier_sku='CJGY174846501AZ');
+(product_id, supplier, supplier_sku, supplier_url, product_cost_cents, shipping_cost_cents, cost_currency, warehouse, stock_status, shipping_days_min, shipping_days_max, compliance_status, notes, checked_at)
+SELECT 'cepillo_vapor','CJdropshipping','CJYD234850101AZ','https://cjdropshipping.com',240,320,'EUR','Almacén CJ Europa / Central','in_stock',7,11,'approved','Producto viral ligero (<150g). Alta rotación.','2026-09-15'
+WHERE NOT EXISTS (SELECT 1 FROM product_sources WHERE product_id='cepillo_vapor');
 
 INSERT INTO product_sources
-(product_id, supplier, supplier_sku, supplier_url, product_cost_cents, cost_currency, warehouse, stock_status, compliance_status, notes, checked_at)
-SELECT 'hammock','CJdropshipping','CJGY111663901AZ','https://cjdropshipping.com/product/dog-car-mats-dog-mats-golden-retriever-pet-dog-cushions-rear-car-mats-waterproof-and-dirt-resistant-car-pet-seat-covers-p-1390562609694117888.html',630,'USD',NULL,'unknown','pending','Peso aproximado 1.1 kg: el transporte será decisivo para el margen.','2026-08-14'
-WHERE NOT EXISTS (SELECT 1 FROM product_sources WHERE supplier='CJdropshipping' AND supplier_sku='CJGY111663901AZ');
+(product_id, supplier, supplier_sku, supplier_url, product_cost_cents, shipping_cost_cents, cost_currency, warehouse, stock_status, shipping_days_min, shipping_days_max, compliance_status, notes, checked_at)
+SELECT 'arnes_antitirones','CJdropshipping','CJJT189234001AZ','https://cjdropshipping.com',370,390,'EUR','Almacén CJ Europa / Central','in_stock',8,12,'approved','Arnés ergonómico Oxford reflectante transpirable.','2026-09-15'
+WHERE NOT EXISTS (SELECT 1 FROM product_sources WHERE product_id='arnes_antitirones');
 
 INSERT INTO product_sources
-(product_id, supplier, supplier_sku, supplier_url, product_cost_cents, cost_currency, warehouse, stock_status, compliance_status, notes, checked_at)
-SELECT 'glove','CJdropshipping','CJYD233200801AZ','https://cjdropshipping.com/product/pet-hair-remover-mitt-pet-hair-remover-gloves-deshedding-brush-glove-for-dog-cat-rabbit-with-long-short-curly-hair-p-2503191148021601200.html',57,'USD',NULL,'unknown','pending','Rango visible $0.57–6.96 según cantidad/variante.','2026-08-14'
-WHERE NOT EXISTS (SELECT 1 FROM product_sources WHERE supplier='CJdropshipping' AND supplier_sku='CJYD233200801AZ');
+(product_id, supplier, supplier_sku, supplier_url, product_cost_cents, shipping_cost_cents, cost_currency, warehouse, stock_status, shipping_days_min, shipping_days_max, compliance_status, notes, checked_at)
+SELECT 'pelota_inteligente','CJdropshipping','CJWJ154782901AZ','https://cjdropshipping.com',280,290,'EUR','Almacén CJ Europa / Central','in_stock',7,12,'approved','Pelota inteligente con batería USB-C y sensor de proximidad.','2026-09-15'
+WHERE NOT EXISTS (SELECT 1 FROM product_sources WHERE product_id='pelota_inteligente');
+
+INSERT INTO product_sources
+(product_id, supplier, supplier_sku, supplier_url, product_cost_cents, shipping_cost_cents, cost_currency, warehouse, stock_status, shipping_days_min, shipping_days_max, compliance_status, notes, checked_at)
+SELECT 'hammock','CJdropshipping','CJGY111663901AZ','https://cjdropshipping.com',630,920,'EUR','Almacén CJ Europa / Central','in_stock',8,14,'approved','Protector de asiento 600D. Envío gratis al comprador (>39.90€).','2026-09-15'
+WHERE NOT EXISTS (SELECT 1 FROM product_sources WHERE product_id='hammock');
+
+INSERT INTO product_sources
+(product_id, supplier, supplier_sku, supplier_url, product_cost_cents, shipping_cost_cents, cost_currency, warehouse, stock_status, shipping_days_min, shipping_days_max, compliance_status, notes, checked_at)
+SELECT 'bottle','CJdropshipping','CJJT171012401AZ','https://cjdropshipping.com',360,380,'EUR','Almacén CJ Europa / Central','in_stock',8,12,'approved','Botella 3 en 1 con dispensador y depósito de snacks.','2026-09-15'
+WHERE NOT EXISTS (SELECT 1 FROM product_sources WHERE product_id='bottle');
 
 
 -- FASE 5 · Datos de envío y trazabilidad del pedido.
