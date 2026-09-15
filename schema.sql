@@ -134,7 +134,12 @@ VALUES
 ('arnes_antitirones','arnes-antitirones-ergonomico-reflectante','Arnés antitirones ergonómico reflectante','Distribuye la presión en el torso sin dañar el cuello. Costuras reflectantes y asa de agarre rápido.','Evita ahogos y lesiones en el cuello gracias a su diseño ergonómico que reparte la fuerza de tracción sobre el pecho. Equipado con anilla frontal antitirones y bandas reflectantes.','paseo','RECOMENDADO','🐕',2690,1,30),
 ('pelota_inteligente','pelota-interactiva-inteligente-led','Pelota interactiva inteligente con sensor y LED','Giro 360° autónomo con sensor de obstáculos para mantener a tu mascota activa y entretenida.','Juguete interactivo con sensor de movimiento inteligente que esquiva paredes y obstáculos de forma autónoma. Silicona suave no tóxica y recarga rápida mediante USB-C.','juguetes','DIVERSIÓN','🎾',1990,1,40),
 ('hammock','protector-asiento-hamaca','Protector de asiento tipo hamaca para coche','Capa impermeable 600D resistente a arañazos, pelo y suciedad con ventana de rejilla transpirable.','Mantén la tapicería de tu vehículo intacta durante cualquier viaje. Fabricado con tela Oxford impermeable y antideslizante, con solapas laterales protectoras y ventana de malla.','viaje','VIAJE TOP','🚗',4490,1,50),
-('bottle','botella-3-en-1-paseo','Botella de paseo portátil 3 en 1','Bebedero hermético de 500ml, contenedor de snacks y dispensador de bolsas en un solo dispositivo.','El todo en uno imprescindible para paseos y excursiones. Con botón dosificador de flujo y bloqueo antifugas que permite recuperar el agua no consumida. Incluye dispensador de bolsas.','paseo','ESENCIAL','💧',2290,1,60);
+('bottle','botella-3-en-1-paseo','Botella de paseo portátil 3 en 1','Bebedero hermético de 500ml, contenedor de snacks y dispensador de bolsas en un solo dispositivo.','El todo en uno imprescindible para paseos y excursiones. Con botón dosificador de flujo y bloqueo antifugas que permite recuperar el agua no consumida. Incluye dispensador de bolsas.','paseo','ESENCIAL','💧',2290,1,60),
+('cortaunas_led','cortaunas-seguro-luz-led-lupa','Cortauñas seguro con luz LED y lupa','Ilumina la línea viva de la uña para evitar cortes dolorosos y sangrado. Con lima oculta y recogedor.','Corte de uñas seguro sin miedo ni sangrado gracias a la luz LED integrada que ilumina la vena viva. Cuchillas de acero quirúrgico y lupa de precisión.','limpieza','ALIEXPRESS TOP','✂️',1890,1,70),
+('alfombra_olfativa','alfombra-olfativa-estimulacion-antiestres','Alfombra olfativa de estimulación mental','10 minutos de olfateo equivalen a 1 hora de ejercicio. Reduce la hiperactividad y el aburrimiento.','Fieltro ecológico multicapa lavable. Estimula el olfato natural, calma la ansiedad por separación y fomenta una alimentación pausada.','hogar','CHOICE 7 DÍAS','🧩',2490,1,80),
+('comedero_laberinto','comedero-antivoracidad-laberinto-3d','Comedero antivoracidad laberinto 3D','Multiplica por 5 el tiempo de comida. Previene atragantamientos, gases y torsión gástrica.','Obstáculos y laberinto curvado que frena a los perros que comen con ansiedad. Base con gomas antideslizantes. Libre de BPA.','hogar','SALUD DIGESTIVA','🥣',1890,1,90),
+('dispensador_linterna','dispensador-bolsas-paseo-linterna-led','Dispensador de bolsas con linterna LED','Luz LED de alta potencia para ver en la oscuridad durante los paseos nocturnos de invierno.','Dispensador hermético con linterna LED integrada y mosquetón metálico. Incluye 3 rollos de bolsas biodegradables.','paseo','NOCTURNO','🔦',1490,1,100),
+('cinturon_elastico','cinturon-seguridad-coche-amortiguacion','Cinturón de seguridad con amortiguación para coche','Cumple la normativa DGT. El tramo elástico absorbe los frenazos bruscos protegiendo a tu perro.','Anclaje universal de acero compatible con todos los coches. Tramo elástico de alta resistencia que absorbe frenazos bruscos.','viaje','SEGURIDAD DGT','🚗',1590,1,110);
 
 -- Proveedores y costes homologados (CJ Dropshipping)
 INSERT INTO product_sources
@@ -166,6 +171,32 @@ INSERT INTO product_sources
 (product_id, supplier, supplier_sku, supplier_url, product_cost_cents, shipping_cost_cents, cost_currency, warehouse, stock_status, shipping_days_min, shipping_days_max, compliance_status, notes, checked_at)
 SELECT 'bottle','CJdropshipping','CJJT171012401AZ','https://cjdropshipping.com',360,380,'EUR','Almacén CJ Europa / Central','in_stock',8,12,'approved','Botella 3 en 1 con dispensador y depósito de snacks.','2026-09-15'
 WHERE NOT EXISTS (SELECT 1 FROM product_sources WHERE product_id='bottle');
+
+-- Proveedores y costes homologados (AliExpress Choice)
+INSERT INTO product_sources
+(product_id, supplier, supplier_sku, supplier_url, product_cost_cents, shipping_cost_cents, cost_currency, warehouse, stock_status, shipping_days_min, shipping_days_max, compliance_status, notes, checked_at)
+SELECT 'cortaunas_led','AliExpress','AE-NAIL-LED-01','https://es.aliexpress.com/w/wholesale-cortau%C3%B1as-perro-led.html?SearchText=cortau%C3%B1as+perro+led',280,190,'EUR','AliExpress Choice (España)','in_stock',5,9,'approved','Coste 2.80€ + Envío 1.90€. PVP 18.90€. Margen limpio: 17.51€ (76.8%).','2026-09-15'
+WHERE NOT EXISTS (SELECT 1 FROM product_sources WHERE product_id='cortaunas_led');
+
+INSERT INTO product_sources
+(product_id, supplier, supplier_sku, supplier_url, product_cost_cents, shipping_cost_cents, cost_currency, warehouse, stock_status, shipping_days_min, shipping_days_max, compliance_status, notes, checked_at)
+SELECT 'alfombra_olfativa','AliExpress','AE-SNUFFLE-02','https://es.aliexpress.com/w/wholesale-snuffle-mat-dog.html?SearchText=snuffle+mat+dog',420,190,'EUR','AliExpress Choice (España)','in_stock',6,10,'approved','Coste 4.20€ + Envío 1.90€. PVP 24.90€. Margen limpio: 22.02€ (76.4%).','2026-09-15'
+WHERE NOT EXISTS (SELECT 1 FROM product_sources WHERE product_id='alfombra_olfativa');
+
+INSERT INTO product_sources
+(product_id, supplier, supplier_sku, supplier_url, product_cost_cents, shipping_cost_cents, cost_currency, warehouse, stock_status, shipping_days_min, shipping_days_max, compliance_status, notes, checked_at)
+SELECT 'comedero_laberinto','AliExpress','AE-SLOWFEED-03','https://es.aliexpress.com/w/wholesale-slow-feeder-bowl-dog.html?SearchText=slow+feeder+bowl+dog',250,180,'EUR','AliExpress Choice (España)','in_stock',5,9,'approved','Coste 2.50€ + Envío 1.80€. PVP 18.90€. Margen limpio: 17.91€ (78.5%).','2026-09-15'
+WHERE NOT EXISTS (SELECT 1 FROM product_sources WHERE product_id='comedero_laberinto');
+
+INSERT INTO product_sources
+(product_id, supplier, supplier_sku, supplier_url, product_cost_cents, shipping_cost_cents, cost_currency, warehouse, stock_status, shipping_days_min, shipping_days_max, compliance_status, notes, checked_at)
+SELECT 'dispensador_linterna','AliExpress','AE-TORCH-BAG-04','https://es.aliexpress.com/w/wholesale-dispensador-bolsas-perro-linterna.html?SearchText=dispensador+bolsas+perro+linterna',190,180,'EUR','AliExpress Choice (España)','in_stock',5,9,'approved','Coste 1.90€ + Envío 1.80€. PVP 14.90€. Margen limpio: 14.57€ (77.5%).','2026-09-15'
+WHERE NOT EXISTS (SELECT 1 FROM product_sources WHERE product_id='dispensador_linterna');
+
+INSERT INTO product_sources
+(product_id, supplier, supplier_sku, supplier_url, product_cost_cents, shipping_cost_cents, cost_currency, warehouse, stock_status, shipping_days_min, shipping_days_max, compliance_status, notes, checked_at)
+SELECT 'cinturon_elastico','AliExpress','AE-SEATBELT-05','https://es.aliexpress.com/w/wholesale-cinturon-seguridad-perro-coche-elastico.html?SearchText=cinturon+seguridad+perro+coche+elastico',180,180,'EUR','AliExpress Choice (España)','in_stock',5,8,'approved','Coste 1.80€ + Envío 1.80€. PVP 15.90€. Margen limpio: 15.65€ (79.0%).','2026-09-15'
+WHERE NOT EXISTS (SELECT 1 FROM product_sources WHERE product_id='cinturon_elastico');
 
 
 -- FASE 5 · Datos de envío y trazabilidad del pedido.
