@@ -4,6 +4,10 @@
   "compatibility_date": "2026-08-29",
   "keep_vars": true,
   "vars": {
+    // SWITCHES DE ENTORNO (Test -> Producción):
+    // 1. STRIPE_MODE: "test" (usa sk_test_) -> "live" (usa sk_live_)
+    // 2. SEO_INDEXING_ENABLED: "false" (noindex) -> "true" (index, sitemap público)
+    // 3. CJ_MODE: "sandbox" (pedidos simulados) -> "live" (pedidos reales a proveedor)
     "STRIPE_MODE": "test",
     "SEO_INDEXING_ENABLED": "false",
     "CJ_MODE": "sandbox"

@@ -88,11 +88,44 @@ INSERT OR REPLACE INTO products (
   50,
   'supplier',
   'https://images.unsplash.com/photo-1541599540903-216a46ca1dc0?w=800&q=80'
+),
+(
+  'garantia_envio',
+  'garantia-envio-protegido',
+  'Garantía de Envío Protegido y Prioritario',
+  'Protección total contra pérdida, rotura o extravío en transporte con reemplazo prioritario express.',
+  'Garantiza la entrega segura de tu pedido. Si tu paquete sufre cualquier percance durante el transporte (rotura, extravío, robo o retraso excesivo), te enviamos un reemplazo inmediato prioritario sin esperas ni trámites burocráticos.',
+  'servicios',
+  'GARANTÍA VIP',
+  '🛡️',
+  199,
+  'EUR',
+  1,
+  998,
+  'unlimited',
+  'https://images.unsplash.com/photo-1583511655857-d19b40a7a54e?w=800&q=80'
+),
+(
+  'cepillo_quitapelos',
+  'rodillo-quitapelos-reutilizable',
+  'Rodillo Quitapelos Lavable Reutilizable NÓMA',
+  'Elimina pelos y pelusas al 100% de sofás, ropa, mantas y alfombras en una sola pasada.',
+  'El compañero imprescindible en cualquier hogar con mascotas. Atrapa el pelo muerto incrustado en tejidos mediante atracción estática sin recambios adhesivos desechables. Fácil de vaciar y lavar con agua. Duradero y ecológico.',
+  'limpieza',
+  'OFERTA FLASH',
+  '✨',
+  499,
+  'EUR',
+  1,
+  999,
+  'supplier',
+  'https://images.unsplash.com/photo-1583511655857-d19b40a7a54e?w=800&q=80'
 );
 
 -- 2. Vincular los datos de proveedor de AliExpress, costes, tiempos y URLs directas
 DELETE FROM product_sources WHERE product_id IN (
-  'cortaunas_led', 'alfombra_olfativa', 'comedero_laberinto', 'dispensador_linterna', 'cinturon_elastico'
+  'cortaunas_led', 'alfombra_olfativa', 'comedero_laberinto', 'dispensador_linterna', 'cinturon_elastico',
+  'garantia_envio', 'cepillo_quitapelos'
 );
 
 INSERT INTO product_sources (
@@ -180,4 +213,36 @@ INSERT INTO product_sources (
   'approved',
   'Coste 1.80 € + Envío 1.80 € = 3.60 €. PVP 15.90 € (+3.90 € envío) = 19.80 €. Margen limpio: 15.65 € (79.0%).',
   '2026-09-15'
+),
+(
+  'garantia_envio',
+  'NÓMA Care',
+  'NOMA-WAR-VIP',
+  'https://nomapet.com',
+  10,
+  0,
+  'EUR',
+  'Digital / Inmediato',
+  'in_stock',
+  0,
+  0,
+  'approved',
+  'Garantía VIP de sustitución prioritaria express sin trámites. Margen 95%.',
+  '2026-09-24'
+),
+(
+  'cepillo_quitapelos',
+  'AliExpress',
+  'AE-ROLLER-HAIR',
+  'https://es.aliexpress.com/w/wholesale-rodillo-quitapelos-perro.html?SearchText=rodillo+quitapelos+perro',
+  120,
+  0,
+  'EUR',
+  'AliExpress Choice (España)',
+  'in_stock',
+  5,
+  9,
+  'approved',
+  'Coste 1.20 € + Envío 0 € (conjunto). PVP 4.99 €. Margen limpio: 3.60 € (72.1%).',
+  '2026-09-24'
 );

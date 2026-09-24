@@ -139,7 +139,9 @@ VALUES
 ('alfombra_olfativa','alfombra-olfativa-estimulacion-antiestres','Alfombra olfativa de estimulación mental','10 minutos de olfateo equivalen a 1 hora de ejercicio. Reduce la hiperactividad y el aburrimiento.','Fieltro ecológico multicapa lavable. Estimula el olfato natural, calma la ansiedad por separación y fomenta una alimentación pausada.','hogar','CHOICE 7 DÍAS','🧩',2490,1,80),
 ('comedero_laberinto','comedero-antivoracidad-laberinto-3d','Comedero antivoracidad laberinto 3D','Multiplica por 5 el tiempo de comida. Previene atragantamientos, gases y torsión gástrica.','Obstáculos y laberinto curvado que frena a los perros que comen con ansiedad. Base con gomas antideslizantes. Libre de BPA.','hogar','SALUD DIGESTIVA','🥣',1890,1,90),
 ('dispensador_linterna','dispensador-bolsas-paseo-linterna-led','Dispensador de bolsas con linterna LED','Luz LED de alta potencia para ver en la oscuridad durante los paseos nocturnos de invierno.','Dispensador hermético con linterna LED integrada y mosquetón metálico. Incluye 3 rollos de bolsas biodegradables.','paseo','NOCTURNO','🔦',1490,1,100),
-('cinturon_elastico','cinturon-seguridad-coche-amortiguacion','Cinturón de seguridad con amortiguación para coche','Cumple la normativa DGT. El tramo elástico absorbe los frenazos bruscos protegiendo a tu perro.','Anclaje universal de acero compatible con todos los coches. Tramo elástico de alta resistencia que absorbe frenazos bruscos.','viaje','SEGURIDAD DGT','🚗',1590,1,110);
+('cinturon_elastico','cinturon-seguridad-coche-amortiguacion','Cinturón de seguridad con amortiguación para coche','Cumple la normativa DGT. El tramo elástico absorbe los frenazos bruscos protegiendo a tu perro.','Anclaje universal de acero compatible con todos los coches. Tramo elástico de alta resistencia que absorbe frenazos bruscos.','viaje','SEGURIDAD DGT','🚗',1590,1,110),
+('garantia_envio','garantia-envio-protegido','Garantía de Envío Protegido y Prioritario','Protección total contra pérdida, rotura o extravío en transporte con reemplazo prioritario.','Garantiza la entrega segura de tu pedido. Si tu paquete sufre cualquier percance durante el transporte (rotura, extravío, robo o retraso excesivo), te enviamos un reemplazo inmediato prioritario sin esperas.','servicios','GARANTÍA VIP','🛡️',199,1,998),
+('cepillo_quitapelos','rodillo-quitapelos-reutilizable','Rodillo Quitapelos Lavable Reutilizable NÓMA','Elimina pelos y pelusas al 100% de sofás, ropa, mantas y alfombras en una sola pasada.','El compañero imprescindible en cualquier hogar con mascotas. Atrapa el pelo incrustado en tejidos mediante atracción estática sin recambios adhesivos desechables. Fácil de vaciar y lavar con agua.','limpieza','OFERTA FLASH','✨',499,1,999);
 
 -- Proveedores y costes homologados (CJ Dropshipping)
 INSERT INTO product_sources
@@ -197,6 +199,16 @@ INSERT INTO product_sources
 (product_id, supplier, supplier_sku, supplier_url, product_cost_cents, shipping_cost_cents, cost_currency, warehouse, stock_status, shipping_days_min, shipping_days_max, compliance_status, notes, checked_at)
 SELECT 'cinturon_elastico','AliExpress','AE-SEATBELT-05','https://es.aliexpress.com/w/wholesale-cinturon-seguridad-perro-coche-elastico.html?SearchText=cinturon+seguridad+perro+coche+elastico',180,180,'EUR','AliExpress Choice (España)','in_stock',5,8,'approved','Coste 1.80€ + Envío 1.80€. PVP 15.90€. Margen limpio: 15.65€ (79.0%).','2026-09-15'
 WHERE NOT EXISTS (SELECT 1 FROM product_sources WHERE product_id='cinturon_elastico');
+
+INSERT INTO product_sources
+(product_id, supplier, supplier_sku, supplier_url, product_cost_cents, shipping_cost_cents, cost_currency, warehouse, stock_status, shipping_days_min, shipping_days_max, compliance_status, notes, checked_at)
+SELECT 'garantia_envio','NÓMA Care','NOMA-WAR-VIP','https://nomapet.com',10,0,'EUR','Digital / Inmediato','in_stock',0,0,'approved','Garantía VIP de sustitución prioritaria express sin trámites. Margen 95%.','2026-09-24'
+WHERE NOT EXISTS (SELECT 1 FROM product_sources WHERE product_id='garantia_envio');
+
+INSERT INTO product_sources
+(product_id, supplier, supplier_sku, supplier_url, product_cost_cents, shipping_cost_cents, cost_currency, warehouse, stock_status, shipping_days_min, shipping_days_max, compliance_status, notes, checked_at)
+SELECT 'cepillo_quitapelos','AliExpress','AE-ROLLER-HAIR','https://es.aliexpress.com/w/wholesale-rodillo-quitapelos-perro.html?SearchText=rodillo+quitapelos+perro',120,0,'EUR','AliExpress Choice (España)','in_stock',5,9,'approved','Coste 1.20€ + Envío 0€ (envío conjunto). PVP 4.99€. Margen limpio: 3.60€ (72%).','2026-09-24'
+WHERE NOT EXISTS (SELECT 1 FROM product_sources WHERE product_id='cepillo_quitapelos');
 
 
 -- FASE 5 · Datos de envío y trazabilidad del pedido.

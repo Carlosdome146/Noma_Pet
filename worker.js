@@ -1258,16 +1258,18 @@ function buildOrderEmail(order, type, origin, config) {
   const trackingCode = order.trackingCode || "";
 
   let rows = (order.items || []).map(item => {
-    const variant = item.variantName ? ` <span style="color:#66756e">· ${escapeHtmlEmail(item.variantName)}</span>` : "";
+    const variant = item.variantName ? ` <span style="color:#5e6d67">· ${escapeHtmlEmail(item.variantName)}</span>` : "";
     const lineTotal = Number(item.unitPrice || 0) * Number(item.quantity || 0);
-    return `<tr><td style="padding:10px 0;border-bottom:1px solid #e7e2d8"><b>${escapeHtmlEmail(item.productName)}</b>${variant}<br><span style="color:#66756e">${Number(item.quantity || 0)} × ${emailMoney(item.unitPrice, order.currency)}</span></td><td style="padding:10px 0;border-bottom:1px solid #e7e2d8;text-align:right;font-weight:700">${emailMoney(lineTotal, order.currency)}</td></tr>`;
+    return `<tr><td style="padding:10px 0;border-bottom:1px solid #e6e2d8"><b>${escapeHtmlEmail(item.productName)}</b>${variant}<br><span style="color:#5e6d67;font-size:13px">${Number(item.quantity || 0)} × ${emailMoney(item.unitPrice, order.currency)}</span></td><td style="padding:10px 0;border-bottom:1px solid #e6e2d8;text-align:right;font-weight:700;color:#0f1715">${emailMoney(lineTotal, order.currency)}</td></tr>`;
   }).join("");
   if (Number(order.shipping || 0) > 0) {
-    rows += `<tr><td style="padding:10px 0;border-bottom:1px solid #e7e2d8"><b>Envío estándar</b></td><td style="padding:10px 0;border-bottom:1px solid #e7e2d8;text-align:right;font-weight:700">${emailMoney(order.shipping, order.currency)}</td></tr>`;
+    rows += `<tr><td style="padding:10px 0;border-bottom:1px solid #e6e2d8"><b>Envío estándar peninsular</b></td><td style="padding:10px 0;border-bottom:1px solid #e6e2d8;text-align:right;font-weight:700;color:#0f1715">${emailMoney(order.shipping, order.currency)}</td></tr>`;
+  } else {
+    rows += `<tr><td style="padding:10px 0;border-bottom:1px solid #e6e2d8"><b>Envío estándar peninsular</b></td><td style="padding:10px 0;border-bottom:1px solid #e6e2d8;text-align:right;font-weight:700;color:#143e30">GRATIS</td></tr>`;
   }
 
   let title = "Pedido confirmado";
-  let intro = `Hemos recibido correctamente el pago de tu pedido <b>${safeCode}</b>.`;
+  let intro = `Hemos recibido correctamente el pago de tu pedido <b>${safeCode}</b>. Nos ponemos en marcha para prepararlo.`;
   let subject = `Pedido confirmado · ${order.publicCode}`;
   let actionLabel = "Consultar pedido";
   let actionHref = site ? `${site}/seguimiento.html` : "";
@@ -1275,13 +1277,13 @@ function buildOrderEmail(order, type, origin, config) {
   if (type === "shipped") {
     title = "Tu pedido está en camino";
     subject = `Tu pedido ${order.publicCode} ha sido enviado`;
-    intro = `Tu pedido <b>${safeCode}</b> ya ha sido enviado.`;
+    intro = `Tu pedido <b>${safeCode}</b> ya ha salido del almacén y viaja hacia tu dirección.`;
     actionLabel = trackingUrlIsSafe(trackingHref) && order.trackingUrl ? "Abrir seguimiento" : "Consultar estado";
     actionHref = trackingHref;
   } else if (type === "delivered") {
     title = "Pedido entregado";
     subject = `Pedido ${order.publicCode} entregado`;
-    intro = `Hemos marcado tu pedido <b>${safeCode}</b> como entregado.`;
+    intro = `Tu pedido <b>${safeCode}</b> figura como entregado. Esperamos que a tu mascota le encante.`;
     actionLabel = "Ver pedido";
     actionHref = site ? `${site}/seguimiento.html` : "";
   }
@@ -1289,24 +1291,24 @@ function buildOrderEmail(order, type, origin, config) {
   if (isTest) subject = `[TEST] ${subject}`;
 
   const trackingBlock = type === "shipped" && trackingCode
-    ? `<div style="background:#edf3ef;border-radius:14px;padding:14px 16px;margin:18px 0"><div style="font-size:12px;color:#66756e;text-transform:uppercase;letter-spacing:.08em">Seguimiento</div><div style="font-size:18px;font-weight:800;margin-top:4px">${escapeHtmlEmail(trackingCode)}</div></div>`
+    ? `<div style="background:#eaf2ed;border-left:4px solid #143e30;border-radius:8px;padding:14px 18px;margin:18px 0"><div style="font-size:11.5px;color:#5e6d67;font-weight:700;text-transform:uppercase;letter-spacing:.06em">Número de Seguimiento</div><div style="font-size:18px;font-weight:800;color:#143e30;margin-top:4px">${escapeHtmlEmail(trackingCode)}</div></div>`
     : "";
 
   const address = order.address || {};
   const addressBlock = type === "confirmation"
-    ? `<div style="margin-top:22px"><div style="font-size:12px;color:#66756e;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">Entrega</div><div>${escapeHtmlEmail(address.line1 || "")}${address.line2 ? `<br>${escapeHtmlEmail(address.line2)}` : ""}<br>${escapeHtmlEmail(address.postalCode || "")} ${escapeHtmlEmail(address.city || "")}${address.province ? `, ${escapeHtmlEmail(address.province)}` : ""}</div></div>`
+    ? `<div style="margin-top:22px;background:#fcfaf6;border:1px solid #e6e2d8;border-radius:10px;padding:14px"><div style="font-size:11.5px;font-weight:700;color:#5e6d67;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">Dirección de Entrega</div><div style="font-size:14px;color:#0f1715;line-height:1.4">${escapeHtmlEmail(address.line1 || "")}${address.line2 ? `<br>${escapeHtmlEmail(address.line2)}` : ""}<br>${escapeHtmlEmail(address.postalCode || "")} ${escapeHtmlEmail(address.city || "")}${address.province ? `, ${escapeHtmlEmail(address.province)}` : ""}</div></div>`
     : "";
 
-  const testBanner = isTest ? `<div style="background:#fff0df;color:#9a4b16;border-radius:12px;padding:10px 12px;margin-bottom:20px;font-size:12px;font-weight:800">ENTORNO DE PRUEBA · No corresponde a un cobro real.</div>` : "";
+  const testBanner = isTest ? `<div style="background:#fff0df;color:#9a4b16;border-radius:10px;padding:10px 14px;margin-bottom:18px;font-size:12px;font-weight:800">ENTORNO DE PRUEBA · No corresponde a un cobro real.</div>` : "";
   const redirectedBanner = config.mode === "test"
-    ? `<div style="background:#eef1ff;color:#34427a;border-radius:12px;padding:10px 12px;margin-bottom:20px;font-size:12px">Modo email de prueba: este mensaje se ha redirigido al email configurado en EMAIL_TEST_RECIPIENT.</div>`
+    ? `<div style="background:#eef1ff;color:#34427a;border-radius:10px;padding:10px 14px;margin-bottom:18px;font-size:12px">Modo email de prueba: este mensaje se ha redirigido a ${escapeHtmlEmail(config.testRecipient)}.</div>`
     : "";
 
   const button = actionHref
-    ? `<a href="${escapeHtmlEmail(actionHref)}" style="display:inline-block;background:#1f5b46;color:#fff;text-decoration:none;padding:12px 18px;border-radius:999px;font-weight:800;margin-top:20px">${escapeHtmlEmail(actionLabel)}</a>`
+    ? `<a href="${escapeHtmlEmail(actionHref)}" style="display:inline-block;background:#143e30;color:#ffffff;text-decoration:none;padding:13px 24px;border-radius:999px;font-size:14px;font-weight:800;letter-spacing:0.02em">${escapeHtmlEmail(actionLabel)} →</a>`
     : "";
 
-  const html = `<!doctype html><html><body style="margin:0;background:#f5f1e9;font-family:Arial,Helvetica,sans-serif;color:#15241e"><div style="max-width:640px;margin:0 auto;padding:28px 16px"><div style="font-size:18px;font-weight:900;margin-bottom:18px">NÓMA PET</div><div style="background:#fff;border:1px solid #e3ded4;border-radius:24px;padding:28px">${testBanner}${redirectedBanner}<div style="font-size:12px;font-weight:800;color:#1f5b46;letter-spacing:.08em;text-transform:uppercase">${safeCode}</div><h1 style="font-size:30px;line-height:1.05;margin:10px 0 14px">${title}</h1><p style="font-size:16px;line-height:1.6;margin:0">Hola${safeName ? ` ${safeName}` : ""}. ${intro}</p>${trackingBlock}<table style="width:100%;border-collapse:collapse;margin-top:22px">${rows}</table><div style="display:flex;justify-content:space-between;gap:16px;margin-top:16px;font-size:18px"><b>Total</b><b>${emailMoney(order.total, order.currency)}</b></div>${addressBlock}${button}<p style="color:#66756e;font-size:12px;line-height:1.6;margin:28px 0 0">Si tienes alguna duda sobre tu pedido, responde a este correo o utiliza los datos de contacto de NÓMA PET.</p></div></div></body></html>`;
+  const html = `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1.0"/><meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/></head><body style="margin:0;padding:0;background-color:#f4efe6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#0f1715;-webkit-font-smoothing:antialiased"><table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color:#f4efe6;padding:32px 12px"><tr><td align="center"><table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width:580px;background-color:#ffffff;border:1px solid #e6e2d8;border-radius:20px;overflow:hidden;box-shadow:0 4px 16px rgba(15,23,21,0.04)"><tr><td style="padding:28px 32px;background-color:#143e30;text-align:left"><span style="font-size:22px;font-weight:900;color:#ffffff;letter-spacing:-0.02em">NÓMA PET</span><div style="font-size:12px;color:#cde0d5;margin-top:2px;letter-spacing:0.04em">ACCESORIOS FUNCIONALES</div></td></tr><tr><td style="padding:32px">${testBanner}${redirectedBanner}<div style="display:inline-block;background:#eaf2ed;color:#143e30;font-size:11.5px;font-weight:800;padding:4px 10px;border-radius:999px;letter-spacing:0.06em;text-transform:uppercase;margin-bottom:12px">PEDIDO ${safeCode}</div><h1 style="font-size:26px;font-weight:800;color:#0f1715;line-height:1.2;margin:0 0 14px">${title}</h1><p style="font-size:15px;line-height:1.6;color:#3b4742;margin:0 0 20px">Hola${safeName ? ` ${safeName}` : ""}. ${intro}</p>${trackingBlock}<div style="font-size:13px;font-weight:800;color:#0f1715;text-transform:uppercase;letter-spacing:0.05em;margin:24px 0 8px;padding-bottom:6px;border-bottom:2px solid #143e30">Resumen de tu compra</div><table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse">${rows}</table><table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="margin-top:16px;border-top:1px solid #e6e2d8;padding-top:14px"><tr><td style="font-size:16px;font-weight:800;color:#0f1715">Total pagado</td><td style="font-size:18px;font-weight:900;color:#143e30;text-align:right">${emailMoney(order.total, order.currency)}</td></tr></table>${addressBlock}<div style="margin-top:28px;text-align:left">${button}</div><hr style="border:none;border-top:1px solid #e6e2d8;margin:32px 0 16px"/><p style="font-size:12px;color:#8b9993;line-height:1.5;margin:0">¿Tienes alguna duda sobre tu pedido? Responde a este correo o visita nomapet.com. Estaremos encantados de ayudarte.</p></td></tr></table><table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width:580px;margin-top:16px"><tr><td style="text-align:center;font-size:12px;color:#8b9993;padding:0 12px">© 2026 NÓMA PET. Todos los derechos reservados.</td></tr></table></td></tr></table></body></html>`;
 
   const textLines = [
     `NÓMA PET — ${title}`,
